@@ -11,6 +11,10 @@ The plugin registers three dsh services:
 | `ctx.sandbox` | `@deepseek-ai/dsh-sandbox-local` | Reports the container world's confinement facts to dsh's stock sandbox-aware consumers. |
 | `ctx.fs` | `@deepseek-ai/dsh-fs-sandbox` | Host filesystem backend fenced by the same mount table: file tools read and write only under the configured sandbox mounts, plus explicit harness read paths. |
 
+The package is itself a dsh profile bundle (`dsh.bundle.patch` points at its `cordis.patch.yml`),
+so the Web Plugins page can install it and switch the whole world on and off; the bundle layer
+disables the three rows above that it replaces. See [Install](#install).
+
 Because `ctx.subprocess` is the shared execution seam, these existing dsh plugins keep working
 over the container world without code changes:
 
@@ -79,18 +83,93 @@ workspace and mount table.
 
 ## Install
 
+The package declares a dsh profile bundle (`dsh.bundle.patch`), so it can be installed and
+switched from the Web sidebar's **Plugins** page:
+
+```bash
+dsh plugin --profile dsh-tui add @codebam/dsh-opensandbox
+```
+
+The same install is **Add plugin** on the Plugins page, where the spec may be the package name,
+a version range, or the absolute path of this checkout. The installed bundle gets the page's
+on/off switch, and the bundle's own page gets the `opensandbox-world` row switch. The bundle
+layer disables the `subprocess`, `sandbox`, and `fs-sandbox` rows itself, so switching the
+bundle off restores dsh's built-in execution world with no second edit. Use the bundle switch,
+not the `opensandbox-world` row switch, for that transition: the row switch unmounts only the
+plugin and leaves the layer's built-in providers disabled. Enablement is stored in
+the profile: the bundle list in its `package.json` and `disabled` overrides in its
+`cordis.patch.yml`. A profile whose files are deployment-managed (Nix, home-manager, a
+read-only profile tree) can still carry the plugin patch by hand; the page then shows
+`opensandbox-world` in its read-only inventory but has no bundle row to switch. Do not mix the
+two forms in one profile: a second `insert` of `opensandbox-world`, or a row whose `name` differs
+from `@codebam/dsh-opensandbox`, leaves the composed tree with a duplicate or mismatched row that
+the Plugins page will not switch.
+
+A hand-managed profile installs the package with npm instead:
+
 ```bash
 npm install @codebam/dsh-opensandbox
 ```
 
-dsh provides the `@deepseek-ai/*` peer packages at runtime, so they are marked optional and are not
-fetched from npm by this package.
+dsh provides the `@deepseek-ai/*` peer packages at runtime, so they are marked optional and are
+not fetched from npm by this package.
 
 ## Configure dsh
 
-Add the plugin to a dsh profile, disable the two local providers it replaces, and disable
-dsh's host-fs provider so the mount-fenced `ctx.fs` can replace it. A profile
-`cordis.patch.yml` (for example `$DSH_HOME/profiles/dsh-tui/cordis.patch.yml`) looks like this:
+Connection, image, and mount-table values are host facts, so the bundled layer inserts the row
+without configuration. With the bundle installed, put the deployment's values in the profile's
+own `cordis.patch.yml`, which is applied after every bundle layer; the id-targeted override below
+wins over the row the bundle inserted:
+
+```yaml
+- id: opensandbox-world
+  config:
+    # Connection (or set OPEN_SANDBOX_API_KEY / OPEN_SANDBOX_DOMAIN in dsh's environment).
+    apiKeyFile: /run/user/1000/opensandbox/api-key
+    domain: 127.0.0.1:8090
+
+    # Sandbox image and workspace.
+    image: docker.io/library/debian:bookworm-slim
+    workspaceRoot: /home/your-user/project
+
+    # Host directories that are part of the reviewed boundary. Use
+    # extraWritableMounts only when the agent must write there; it is a
+    # host-operator-only grant.
+    extraReadOnlyMounts:
+      - /nix/store
+    extraWritableMounts: []
+
+    # Harness-owned host reads (user skills, ~/.dsh/AGENTS.md). Keep this
+    # list narrow: every entry is reachable by the model-facing read tool.
+    trustedReadPaths:
+      - /home/your-user/.dsh/AGENTS.md
+      - /home/your-user/.dsh/skills
+
+    # dsh web sessions may open any project under these roots; each
+    # session still binds only its own workspace root into its sandbox.
+    workspaceParents:
+      - /home/your-user/Documents/git
+
+    # Credential/control trees ctx.fs must not read and the server guard
+    # must not allow mounting a parent of.
+    protectedPaths:
+      - /home/your-user/.ssh
+      - /home/your-user/.gnupg
+      - /home/your-user/.dsh
+      - /home/your-user/.config/gh
+      - /home/your-user/.config/sops
+
+    # Limits and lifetime.
+    timeoutSeconds: 43200
+    cpu: "4"
+    memory: 8Gi
+```
+
+### Hand-managed profile
+
+A profile that does not install the bundle performs the row swap in `cordis.patch.yml` itself.
+Disable the two local providers and the host-fs backend, then insert the row and copy the fields
+from the `config:` mapping above under the inserted row:
 
 ```yaml
 - id: subprocess
@@ -107,49 +186,42 @@ dsh's host-fs provider so the mount-fenced `ctx.fs` can replace it. A profile
     - id: opensandbox-world
       name: '@codebam/dsh-opensandbox'
       config:
-        # Connection (or set OPEN_SANDBOX_API_KEY / OPEN_SANDBOX_DOMAIN in dsh's environment).
-        apiKeyFile: /run/user/1000/opensandbox/api-key
-        domain: 127.0.0.1:8090
-
-        # Sandbox image and workspace.
-        image: docker.io/library/debian:bookworm-slim
-        workspaceRoot: /home/your-user/project
-
-        # Host directories that are part of the reviewed boundary. Use
-        # extraWritableMounts only when the agent must write there; it is a
-        # host-operator-only grant.
-        extraReadOnlyMounts:
-          - /nix/store
-        extraWritableMounts: []
-
-        # Harness-owned host reads (user skills, ~/.dsh/AGENTS.md). Keep this
-        # list narrow: every entry is reachable by the model-facing read tool.
-        trustedReadPaths:
-          - /home/your-user/.dsh/AGENTS.md
-          - /home/your-user/.dsh/skills
-
-        # dsh web sessions may open any project under these roots; each
-        # session still binds only its own workspace root into its sandbox.
-        workspaceParents:
-          - /home/your-user/Documents/git
-
-        # Credential/control trees ctx.fs must not read and the server guard
-        # must not allow mounting a parent of.
-        protectedPaths:
-          - /home/your-user/.ssh
-          - /home/your-user/.gnupg
-          - /home/your-user/.dsh
-          - /home/your-user/.config/gh
-          - /home/your-user/.config/sops
-
-        # Limits and lifetime.
-        timeoutSeconds: 43200
-        cpu: "4"
-        memory: 8Gi
+        # … the config mapping shown above
 ```
 
-Relative `name` values resolve from dsh's profile `node_modules`, where `npm install
-@codebam/dsh-opensandbox` places the package. An absolute path to `index.mjs` also works.
+Relative `name` values resolve from dsh's profile `node_modules`, where
+`npm install @codebam/dsh-opensandbox` places the package. An absolute path to `index.mjs`
+also works, but a path-named row is outside the bundle inventory and stays read-only in the
+Plugins page.
+
+### Deployment-managed profiles
+
+A Nix or home-manager deployment can keep owning the profile's `cordis.patch.yml` and still use
+the bundle: install the package once with `dsh plugin --profile <name> add ...` (or list it in the
+profile's `package.json` dependencies and `dsh.profile.bundles`), remove the hand-written row swap
+from the managed patch, and keep only id-targeted overrides there for host configuration and
+environment-conditional enablement. The bundle selection then lives in `package.json`, while the
+managed patch still wins for `config` and can preserve a per-process escape hatch. A row switch
+on the bundle's page also records its `disabled` override in that patch, so a deployment that
+rewrites the file reasserts its own default on the next activation; the bundle switch itself
+lives in `package.json`. A Nix package of this plugin must install `cordis.patch.yml` next to
+`index.mjs`; the npm `files` list is the contract for what ships.
+
+```yaml
+- id: subprocess
+  disabled: !!js "!process.env.DSH_NO_OPENSANDBOX"
+
+- id: sandbox
+  disabled: !!js "!process.env.DSH_NO_OPENSANDBOX"
+
+- id: fs-sandbox
+  disabled: !!js "!process.env.DSH_NO_OPENSANDBOX"
+
+- id: opensandbox-world
+  disabled: !!js "Boolean(process.env.DSH_NO_OPENSANDBOX)"
+  config:
+    # … the config mapping shown above
+```
 
 ## Configuration
 
@@ -242,10 +314,11 @@ npm run check
 
 There is no build step: the published files are the same ESM files dsh loads.
 
-`npm test` runs the mount-policy/filesystem fence tests and a mock E2E over an in-process fake
+`npm test` runs the mount-policy/filesystem fence tests, asserts the profile-bundle manifest and
+`cordis.patch.yml` through dsh's own overlay parser, and runs a mock E2E over an in-process fake
 OpenSandbox server (it asserts the execd request schema, SSE framing, metadata labels, mount
-modes, and PTY frames). It imports `@deepseek-ai/cordis`, which dsh provides at runtime and npm
-cannot fetch, so point the checkout at any dsh install's modules first:
+modes, and PTY frames). The tests import dsh runtime modules, which npm cannot fetch, so point
+the checkout at any dsh install's modules first:
 
 ```bash
 ln -sfn "$DSH_HOME/profiles/node_modules" node_modules   # DSH_HOME defaults to ~/.dsh

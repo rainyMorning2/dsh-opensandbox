@@ -16,6 +16,11 @@
  * tools see the same files because the configured workspace is bind-mounted
  * at the same absolute path inside the sandbox.
  *
+ * The package declares a dsh profile bundle (`dsh.bundle.patch` ->
+ * `cordis.patch.yml`), whose layer disables the three rows this plugin
+ * replaces while inserting its own `opensandbox-world` row, so the Web
+ * Plugins page can install and switch the whole world on and off.
+ *
  * @module @codebam/dsh-opensandbox
  */
 import z from '@deepseek-ai/schemastery'

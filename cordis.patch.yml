@@ -1,0 +1,40 @@
+# @codebam/dsh-opensandbox as a dsh profile bundle.
+#
+# Selecting this bundle in the Plugins page replaces dsh's host execution world
+# with OpenSandbox containers. The rows it replaces are disabled in the same
+# layer that inserts the replacement, so the bundle switch is one coherent
+# on/off for the whole world: off restores dsh's built-in subprocess/sandbox/fs
+# providers, on mounts every command and file tool over the container mount
+# table.
+#
+# Switch the bundle itself off to return to the host world. The row switch on
+# the bundle's page unmounts only this plugin and leaves the three rows above
+# disabled, so it is a diagnostic pause, not a fallback.
+#
+# Deployment-specific values do not belong in this bundled layer. Override the
+# inserted row from the profile's own cordis.patch.yml, which applies after
+# every bundle layer and wins:
+#
+#   - id: opensandbox-world
+#     config:
+#       apiKeyFile: /run/user/1000/opensandbox/api-key
+#       domain: 127.0.0.1:8090
+#       image: docker.io/library/debian:bookworm-slim
+#       extraReadOnlyMounts: [/nix/store]
+#       trustedReadPaths: [/home/you/.dsh/AGENTS.md, /home/you/.dsh/skills]
+#       protectedPaths: [/home/you/.ssh, /home/you/.gnupg, /home/you/.dsh]
+
+- id: subprocess
+  disabled: true
+
+- id: sandbox
+  disabled: true
+
+# dsh's shipped host-fs backend fences writes but leaves reads unconfined. The
+# plugin supplies a ctx.fs fenced by the same mount table the container uses.
+- id: fs-sandbox
+  disabled: true
+
+- insert:
+    - id: opensandbox-world
+      name: '@codebam/dsh-opensandbox'
