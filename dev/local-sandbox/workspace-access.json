@@ -1,0 +1,4 @@
+{
+  "roots": ["/tmp/dsh-sandbox-demo/session-a"],
+  "defaultWorkspace": "/tmp/dsh-sandbox-demo/session-a"
+}
