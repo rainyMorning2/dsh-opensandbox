@@ -41,6 +41,7 @@ export class OpenSandboxFileSystem extends LocalFileSystem {
       throw new TypeError('OpenSandboxFileSystem: a MountPolicy is required')
     }
     this.mountPolicy = config.mountPolicy
+    this.targetRoots = new WeakMap()
   }
 
   /**
@@ -64,32 +65,33 @@ export class OpenSandboxFileSystem extends LocalFileSystem {
    */
   async resolve(path, opts) {
     const target = await super.resolve(path, opts)
-    const sessionRoot = sessionRootFromOptions(opts)
+    const sessionRoot = sessionRootFromOptions(opts, this.ctx)
     if (
       !this.mountPolicy.isReadable(String(target.targetKey), {
         sessionRoot,
         allowParents: sessionRoot === undefined,
       })
     ) {
-      if (sessionRoot === undefined) {
+      if (opts?.cwd === undefined) {
         throw new FsError(`cannot access "${target.displayPath}": not found`, 'FS_NOT_FOUND')
       }
       throw this.denial('access', target.displayPath)
     }
+    if (sessionRoot !== undefined) this.targetRoots.set(target, sessionRoot)
     return target
   }
 
   /** Fence lstat by the canonical parent, since the final component is not followed. */
   async lstat(path, opts, signal) {
     if (typeof path === 'string' && path.trim().length > 0) {
-      const sessionRoot = sessionRootFromOptions(opts)
-      const cwd = sessionRoot ?? this.config.cwd
+      const sessionRoot = sessionRootFromOptions(opts, this.ctx)
+      const cwd = opts?.cwd ?? sessionRoot ?? this.config.cwd
       const candidate = this.mountPolicy.visiblePathForHostPath(path, cwd, {
         sessionRoot,
         allowParents: sessionRoot === undefined,
       })
       if (candidate === undefined) {
-        if (sessionRoot === undefined) return undefined
+        if (opts?.cwd === undefined) return undefined
         throw this.denial('access', path)
       }
     }
@@ -98,13 +100,15 @@ export class OpenSandboxFileSystem extends LocalFileSystem {
 
   /** Keep child targets under a readable directory; drop symlinks that escape. */
   async listDir(target, signal) {
-    this.assertVisible(target, 'access', { allowParents: true })
+    const sessionRoot = this.targetRoots.get(target) ?? sessionRootFromOptions(undefined, this.ctx)
+    const options = { sessionRoot, allowParents: sessionRoot === undefined }
+    this.assertVisible(target, 'access', options)
     const entries = await super.listDir(target, signal)
     const parent = String(target.targetKey)
     return entries.filter((entry) => {
       const child = String(entry.target.targetKey)
       if (pathContains(parent, child)) return true
-      return this.mountPolicy.isReadable(child, { allowParents: true })
+      return this.mountPolicy.isReadable(child, options)
     })
   }
 
@@ -112,7 +116,8 @@ export class OpenSandboxFileSystem extends LocalFileSystem {
   processPathFromHostPath(hostPath) {
     if (typeof hostPath !== 'string' || !isAbsolute(hostPath)) return undefined
     const canonical = realpathOrNormalized(hostPath)
-    if (!this.mountPolicy.isReadable(canonical, { allowParents: true })) return undefined
+    const sessionRoot = sessionRootFromOptions(undefined, this.ctx)
+    if (!this.mountPolicy.isReadable(canonical, { sessionRoot, allowParents: sessionRoot === undefined })) return undefined
     return super.processPathFromHostPath(canonical)
   }
 
@@ -173,7 +178,9 @@ export class OpenSandboxFileSystem extends LocalFileSystem {
 }
 
 /** The session cwd from `resolve`/`lstat` options, when one is supplied. */
-function sessionRootFromOptions(opts) {
+function sessionRootFromOptions(opts, ctx) {
+  const owned = ctx?.get('agents')?.currentInitiator()?.session.header.cwd
+  if (typeof owned === 'string' && owned.trim().length > 0) return owned
   const cwd = opts?.cwd
   return typeof cwd === 'string' && cwd.trim().length > 0 ? cwd : undefined
 }

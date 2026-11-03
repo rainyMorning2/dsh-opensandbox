@@ -77,6 +77,36 @@ try {
   assert.equal(sessionByPath.get(session).readOnly, undefined)
   assert.equal(sessionByPath.has(sibling), false)
 
+  const isolated = new MountPolicy({ workspaceRoot: base, workspaceParents: [base], sessionWorkspaceOnly: true })
+  assert.deepEqual(isolated.volumesFor(session, session).map(volume => volume.host.path), [session])
+  assert.equal(isolated.isReadable(join(sibling, 'sibling.txt'), { sessionRoot: session }), false)
+  assert.equal(isolated.isWritable(join(sibling, 'sibling.txt'), { sessionRoot: session }), false)
+  assert.throws(() => isolated.resolveMount(sibling, session), /outside the session workspace/)
+  assert.equal(isolated.isReadable(join(session, 'session.txt'), { sessionRoot: session }), true)
+  assert.equal(isolated.isWritable(join(session, 'session.txt'), { sessionRoot: session }), true)
+
+  const ownerContext = new Context()
+  ownerContext.provide('agents', { currentInitiator: () => ({ session: { header: { cwd: session } } }) })
+  const ownedProvider = new OpenSandboxSubprocess(ownerContext, {
+    workspaceRoot: workspace,
+    workspaceParents: [base],
+    sessionWorkspaceOnly: true,
+    allowDynamicMounts: false,
+    executableMappings: { '/host/rg': '/usr/bin/rg' },
+  })
+  assert.equal(ownedProvider.sessionRootFor({ cwd: sibling }), session)
+  assert.equal(ownedProvider.sessionRootFor({ cwd: sibling, sandboxPolicy: { workspaceRoot: sibling } }), session)
+  assert.throws(() => ownedProvider.mountRootFor(sibling, ownedProvider.sessionRootFor({ cwd: sibling })), /outside the session workspace/)
+  assert.equal(ownedProvider.config.executableMappings['/host/rg'], '/usr/bin/rg')
+  const ownedFs = new OpenSandboxFileSystem(ownerContext, { mountPolicy: isolated, cwd: workspace })
+  await assert.rejects(ownedFs.resolve(join(sibling, 'sibling.txt'), { cwd: sibling }), error => error.code === 'FS_SANDBOX_DENIED')
+  await assert.rejects(ownedFs.resolve(join(base, '.git')), error => error.code === 'FS_NOT_FOUND')
+  assert.equal(await ownedFs.lstat(join(base, '.git')), undefined)
+  await assert.rejects(ownedFs.resolve(join(base, '.git'), { cwd: session }), error => error.code === 'FS_SANDBOX_DENIED')
+  await assert.rejects(ownedFs.lstat('sibling.txt', { cwd: sibling }), error => error.code === 'FS_SANDBOX_DENIED')
+  await ownedProvider.close()
+  await ownerContext.fiber.dispose()
+
   const protectedDir = join(base, 'protected')
   mkdirSync(protectedDir)
   const guardedPolicy = new MountPolicy({

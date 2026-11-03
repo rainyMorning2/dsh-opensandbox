@@ -74,9 +74,11 @@ export class MountPolicy {
     workspaceParents = [],
     protectedPaths = [],
     allowDynamic = true,
+    sessionWorkspaceOnly = false,
   } = {}) {
     this.workspaceRoot = canonicalMountPath(workspaceRoot)
     this.allowDynamic = allowDynamic !== false
+    this.sessionWorkspaceOnly = sessionWorkspaceOnly
     this.mounts = new Map()
     this.trustedReadPaths = []
     this.workspaceParents = normalizePathList(workspaceParents, 'workspace parent', { requireDirectory: true })
@@ -126,10 +128,11 @@ export class MountPolicy {
   }
 
   /** The narrowest bind mount containing `path`, or undefined. */
-  rootFor(path) {
+  rootFor(path, sessionRoot) {
     const canonical = realpathOrNormalized(path)
     let best
     for (const entry of this.mounts.values()) {
+      if (this.sessionWorkspaceOnly && sessionRoot !== undefined && entry.source === 'workspace') continue
       if (!pathContains(entry.path, canonical)) continue
       if (best === undefined || entry.path.length > best.path.length) best = entry
     }
@@ -193,7 +196,7 @@ export class MountPolicy {
     const session = this.assertMountableSessionRoot(sessionRoot ?? this.workspaceRoot)
     const path = realpathOrNormalized(cwd)
     if (!pathContains(session, path)) {
-      const global = this.rootFor(path)
+      const global = this.rootFor(path, session)
       if (global === undefined) {
         throw new OpenSandboxError(
           `OpenSandbox: command cwd ${cwd} is outside the session workspace ${session} and every configured mount root; ` +
@@ -202,7 +205,7 @@ export class MountPolicy {
       }
       return { key: `${global.path}\u0000${session}`, root: global.path, sessionRoot: session }
     }
-    const global = this.rootFor(path)
+    const global = this.rootFor(path, session)
     if (global !== undefined && !pathContains(global.path, session)) {
       return { key: global.path, root: global.path, sessionRoot: session }
     }
@@ -218,7 +221,7 @@ export class MountPolicy {
   isReadable(path, { sessionRoot, allowParents = false } = {}) {
     const canonical = realpathOrNormalized(path)
     if (this.trustedReadPaths.some((trusted) => pathContains(trusted, canonical))) return true
-    const global = this.rootFor(canonical)
+    const global = this.rootFor(canonical, sessionRoot)
     if (this.isProtected(canonical)) {
       // A protected path is readable only when an operator configured a
       // read-only mount whose root is itself that protected path (for
@@ -246,7 +249,7 @@ export class MountPolicy {
     // Credential/control paths never become writable through ctx.fs,
     // including a session workspace nested under one.
     if (this.isProtected(canonical)) return false
-    const global = this.rootFor(canonical)
+    const global = this.rootFor(canonical, sessionRoot)
     if (global !== undefined) return global.writable
     if (sessionRoot === undefined) return false
     try {
@@ -297,6 +300,7 @@ export class MountPolicy {
   /** Build the OpenSandbox volume list for one sandbox target. */
   volumesFor(rootPath, sessionRoot) {
     const entries = new Map(this.mounts)
+    if (this.sessionWorkspaceOnly && sessionRoot !== undefined) entries.delete(this.workspaceRoot)
     if (sessionRoot !== undefined) {
       const session = this.assertMountableSessionRoot(sessionRoot)
       if (!entries.has(session)) {

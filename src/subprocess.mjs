@@ -140,6 +140,7 @@ function normalizeConfig(config = {}) {
     workspaceParents,
     protectedPaths,
     allowDynamicMounts: config.allowDynamicMounts !== false,
+    sessionWorkspaceOnly: config.sessionWorkspaceOnly === true,
     timeoutSeconds,
     commandTimeoutMs,
     requestTimeoutMs,
@@ -184,6 +185,7 @@ export class OpenSandboxSubprocess extends SubprocessRuntime {
       workspaceParents: this.config.workspaceParents,
       protectedPaths: this.config.protectedPaths,
       allowDynamic: this.config.allowDynamicMounts,
+      sessionWorkspaceOnly: this.config.sessionWorkspaceOnly,
     })
     this.sandboxes = new Map()
     this.recycling = Promise.resolve()
@@ -219,8 +221,11 @@ export class OpenSandboxSubprocess extends SubprocessRuntime {
     return { exitCode, stdout, stderr }
   }
 
-  /** The session workspace root a spawn specification may use. */
+  /** The calling Agent's immutable Session workspace; explicit roots apply only to agentless calls. */
   sessionRootFor(spec = {}) {
+    const agent = this.ctx.get('agents')?.currentInitiator()
+    const fromSession = agent?.session.header.cwd
+    if (typeof fromSession === 'string' && fromSession.trim().length > 0) return fromSession
     const fromPolicy = spec?.sandboxPolicy?.workspaceRoot
     if (typeof fromPolicy === 'string' && fromPolicy.trim().length > 0) return fromPolicy
     const fromCwd = spec?.cwd

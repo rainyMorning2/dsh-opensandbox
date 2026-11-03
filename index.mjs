@@ -80,6 +80,8 @@ export const Config = z.object({
    * so a model `workdir` still cannot turn a sibling directory into a mount.
    */
   workspaceParents: z.array(z.string()).required(false),
+  /** Exclude the fallback workspace from ordinary Session mounts. */
+  sessionWorkspaceOnly: z.boolean().required(false),
   /**
    * Host credential/control trees that must stay hidden from ctx.fs unless a
    * trusted read path explicitly covers them or a configured read-only mount
