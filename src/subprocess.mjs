@@ -4,7 +4,7 @@ import { delimiter, isAbsolute, join } from 'node:path'
 import { PassThrough } from 'node:stream'
 import WebSocket from 'ws'
 import { SubprocessRuntime, SubprocessExecutableNotFoundError } from '@deepseek-ai/dsh-subprocess'
-import { OpenSandboxClient, OpenSandboxError, resolveApiKey, resolveBaseUrl, sseEvents } from './client.mjs'
+import { OpenSandboxClient, OpenSandboxError, resolveApiKey, resolveBaseUrl, sseEvents, commandOutputText } from './client.mjs'
 import { TailCollector } from './collect.mjs'
 import { canonicalMountPath, MountPolicy } from './mounts.mjs'
 import {
@@ -131,7 +131,14 @@ function normalizeConfig(config = {}) {
   for (const [key, value] of Object.entries(config.env ?? {})) {
     if (typeof value === 'string') containerEnvOverrides[key] = value
   }
+  const executableMappings = { ...(config.executableMappings ?? {}) }
+  for (const [hostPath, containerPath] of Object.entries(executableMappings)) {
+    if (!isAbsolute(hostPath) || !isAbsolute(containerPath)) {
+      throw new OpenSandboxError('OpenSandbox: executableMappings keys and values must be absolute paths')
+    }
+  }
   return {
+    executableMappings,
     workspaceRoot,
     image: textOr(config.image, DEFAULT_IMAGE),
     extraReadOnlyMounts,
@@ -195,12 +202,18 @@ export class OpenSandboxSubprocess extends SubprocessRuntime {
     this.closed = false
   }
 
+  /** Translate the executable path without rewriting argument values or shell source. */
+  commandArgv(argv, sessionRoot) {
+    const executable = this.config.executableMappings[argv[0]] ?? argv[0]
+    return [executable, ...argv.slice(1)]
+  }
+
   /** Execute one argv in the sandbox and collect its output. Internal helper. */
   async runCollect(argv, { cwd = this.config.workspaceRoot, env = {}, signal, timeoutMs = 0 } = {}) {
     const sandboxId = await this.ensureSandboxFor(cwd, this.config.workspaceRoot)
     const body = {
-      command: shellJoin(argv),
-      cwd,
+      command: shellJoin(this.commandArgv(argv, this.config.workspaceRoot)),
+      cwd: cwd,
       envs: { ...this.config.containerEnv, ...env },
     }
     if (timeoutMs > 0) body.timeout = Math.floor(timeoutMs)
@@ -210,8 +223,8 @@ export class OpenSandboxSubprocess extends SubprocessRuntime {
     let exitCode = 0
     for await (const event of sseEvents(response, signal)) {
       if (typeof event !== 'object' || event === null) continue
-      if (event.type === 'stdout') stdout += typeof event.text === 'string' ? event.text : ''
-      else if (event.type === 'stderr') stderr += typeof event.text === 'string' ? event.text : ''
+      if (event.type === 'stdout') stdout += commandOutputText(event)
+      else if (event.type === 'stderr') stderr += commandOutputText(event)
       else if (event.type === 'error') {
         const code = Number.parseInt(String(event.error?.evalue ?? event.error?.value ?? '1'), 10)
         exitCode = Number.isFinite(code) ? code : 1
@@ -547,7 +560,7 @@ class OpenSandboxCommandProcess {
       const sessionRoot = this.provider.sessionRootFor(this.spec)
       this.sandboxId = await this.provider.ensureSandboxFor(this.spec.cwd, sessionRoot)
       const env = { ...this.provider.config.containerEnv, ...(this.spec.env ?? {}) }
-      const command = shellJoin(this.spec.argv)
+      const command = shellJoin(this.provider.commandArgv(this.spec.argv, sessionRoot))
       const body = {
         command,
         cwd: this.spec.cwd,
@@ -569,14 +582,14 @@ class OpenSandboxCommandProcess {
             break
           }
           case 'stdout': {
-            const text = typeof event.text === 'string' ? event.text : ''
+            const text = commandOutputText(event)
             if (this.collectorOut !== null) this.collectorOut.push(text)
             if (this.pipeOut !== null && this.pipeOut !== process.stdout) this.pipeOut.write(text)
             else if (this.pipeOut === process.stdout) process.stdout.write(text)
             break
           }
           case 'stderr': {
-            const text = typeof event.text === 'string' ? event.text : ''
+            const text = commandOutputText(event)
             if (this.collectorErr !== null) this.collectorErr.push(text)
             if (this.pipeErr !== null && this.pipeErr !== process.stderr) this.pipeErr.write(text)
             else if (this.pipeErr === process.stderr) process.stderr.write(text)
@@ -693,8 +706,9 @@ class OpenSandboxTerminalHandle {
         ...(this.spec.env ?? {}),
       }
       const argv = Array.isArray(this.spec.argv) && this.spec.argv.length > 0 ? this.spec.argv : ['/bin/bash', '--noprofile', '--norc', '-i']
+      const mappedArgv = this.provider.commandArgv(argv, sessionRoot)
       const assignments = Object.entries(env).map(([key, value]) => `${key}=${String(value)}`)
-      const command = `exec ${shellJoin(['env', ...assignments, ...argv])}`
+      const command = `exec ${shellJoin(['env', ...assignments, ...mappedArgv])}`
       this.sessionId = await this.client.createPty(this.sandboxId, { cwd: this.spec.cwd, command })
       const url = await this.client.ptyWsUrl(this.sandboxId, this.sessionId)
       this.ws = new WebSocket(url, { headers: this.client.headers() })
@@ -766,6 +780,11 @@ class OpenSandboxTerminalHandle {
       throw new OpenSandboxError('OpenSandbox: terminal dimensions must be positive integers')
     }
     this.sendJson({ type: 'resize', cols, rows })
+  }
+
+  /** Execd provides no shell-activity inspection; retain terminals conservatively. */
+  async inspectActivity() {
+    return { state: 'unknown', revision: 0 }
   }
 
   /** Remote PTY foreground inspection is not exposed; consumers fall back. */

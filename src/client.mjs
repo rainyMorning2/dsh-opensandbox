@@ -102,6 +102,12 @@ export async function* sseEvents(response, signal) {
   }
 }
 
+/** Restore the line delimiter omitted by execd command stdout/stderr events. */
+export function commandOutputText(event) {
+  if (typeof event.text !== 'string') return ''
+  return event.text.endsWith('\n') ? event.text : `${event.text}\n`
+}
+
 /** HTTP client for one OpenSandbox lifecycle server. */
 export class OpenSandboxClient {
   constructor(config = {}) {
@@ -170,8 +176,42 @@ export class OpenSandboxClient {
     const created = await this.requestJson('POST', '/sandboxes', { body, signal, timeoutMs: this.requestTimeoutMs })
     const id = textOr(created?.id, '')
     if (id.length === 0) throw new OpenSandboxError('OpenSandbox: create response did not include a sandbox id')
-    await this.waitForSandbox(id, signal)
-    return id
+    try {
+      await this.waitForSandbox(id, signal)
+      await this.waitForExecd(id, signal)
+      return id
+    } catch (error) {
+      try {
+        await this.killSandbox(id)
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `OpenSandbox: sandbox ${id} failed startup and could not be deleted`)
+      }
+      this.forgetEndpoint(id)
+      throw error
+    }
+  }
+
+  /** Wait for execd before any command or PTY can be submitted. Only GET probes are retried. */
+  async waitForExecd(id, signal) {
+    const base = await this.execdBase(id, signal)
+    const timeout = AbortSignal.timeout(this.sandboxWaitMs)
+    const budget = signal === undefined ? timeout : AbortSignal.any([signal, timeout])
+    while (true) {
+      budget.throwIfAborted()
+      try {
+        const response = await fetch(`${base}/ping`, {
+          headers: this.headers(),
+          signal: AbortSignal.any([budget, AbortSignal.timeout(Math.min(this.requestTimeoutMs, this.sandboxWaitMs))]),
+        })
+        await response.arrayBuffer()
+        if (response.ok) return
+        if (response.status < 500) throw new OpenSandboxError(`OpenSandbox: execd readiness refused for ${id}: HTTP ${response.status}`, { status: response.status })
+      } catch (error) {
+        budget.throwIfAborted()
+        if (error instanceof OpenSandboxError) throw error
+      }
+      await sleep(250)
+    }
   }
 
   /** Poll one sandbox until it is Running. */

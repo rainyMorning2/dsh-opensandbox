@@ -47,7 +47,7 @@
   },
   "scripts": {
     "check": "for f in index.mjs src/*.mjs; do node --check \"$f\" || exit 1; done",
-    "test": "node test/mount-policy.mjs && node test/bundle.mjs && node test/mock-e2e.mjs && node test/workspace-paths.mjs",
+    "test": "node test/mount-policy.mjs && node test/bundle.mjs && node test/mock-e2e.mjs && node test/readiness.mjs && node test/workspace-paths.mjs",
     "pack:check": "npm pack --dry-run"
   },
   "dependencies": {

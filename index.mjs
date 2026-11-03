@@ -123,6 +123,8 @@ export const Config = z.object({
    * keep working there. Unset or empty names are skipped rather than blanked.
    */
   forwardEnv: z.array(z.string()).required(false),
+  /** Exact host executable paths mapped to installed container executables. */
+  executableMappings: z.dict(z.string()).required(false),
 })
 
 /**

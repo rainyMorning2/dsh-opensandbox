@@ -162,6 +162,9 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify({ endpoint: `127.0.0.1:${server.address().port}/v1/sandboxes/${endpointMatch[1]}/proxy/44772` }))
       return
     }
+    if (req.method === 'GET' && path.endsWith('/proxy/44772/ping')) {
+      res.writeHead(200); res.end('pong'); return
+    }
     if (req.method === 'POST' && commandMatch !== null && isLive(commandMatch[1])) {
       const body = await readJson(req)
       captured.commands.push({ ...body, sandboxId: commandMatch[1] })
