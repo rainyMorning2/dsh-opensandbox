@@ -23,11 +23,11 @@ over the container world without code changes:
 - `@deepseek-ai/dsh-tool-fs-search` — `grep`/`glob` run inside the sandbox
 - dsh's permission/escalation flow and `sandbox:policy` context
 
-The session's immutable workspace is bind-mounted into the sandbox at the same absolute path, so
-the container and `ctx.fs` see the same files. This is the key difference from a single-project
-plugin: dsh web sessions can open any project directory under a configured `workspaceParents`
-root, and each session gets its own sandbox mounted with that exact workspace root. The
-configured `workspaceRoot` remains the fallback for calls without a session cwd.
+The Session's immutable workspace is bind-mounted at the same absolute path, so the container
+and `ctx.fs` see the same files. Web Sessions may select directories under configured
+`workspaceParents`; Sessions with the same canonical Workspace path reuse its sandbox in the
+current DSH process. The configured `workspaceRoot` remains the fallback for calls without a
+Session cwd.
 
 The filesystem backend is host-side, but the plugin fences it with the session workspace and the
 same mount table the container uses: a model-facing `read`, `write`, or `edit` cannot resolve a
@@ -232,10 +232,12 @@ lives in `package.json`. A Nix package of this plugin must install `cordis.patch
 | `domain` | `OPEN_SANDBOX_DOMAIN` or `localhost:8080` | Lifecycle host, optionally with port. |
 | `protocol` | `OPEN_SANDBOX_PROTOCOL` or `http` | `http` or `https`. |
 | `image` | `docker.io/library/debian:bookworm-slim` | Sandbox image URI. Pin a digest in production. |
-| `workspaceRoot` | `process.cwd()` | Host directory mounted read-write at the same path. |
+| `workspaceRoot` | `process.cwd()` | Fallback host workspace for calls without a Session. |
 | `extraReadOnlyMounts` | `["/nix/store"]` | Extra host dirs mounted read-only at the same path. An empty list means this default, because the loader materializes an absent optional array as `[]`. |
 | `extraWritableMounts` | `[]` | Host dirs mounted read-write at the same path. Host-operator-only: never source this from model output or an untrusted file. |
 | `trustedReadPaths` | `[]` | Host paths `ctx.fs` may read for harness-owned features (skills, user instructions) without mounting them into the container and without allowing writes. |
+| `sessionWorkspaceOnly` | `false` | When true, a Session mounts only its own immutable workspace and explicit extra mounts. The fallback `workspaceRoot` is excluded from other Sessions and cannot grant file access there. |
+| `executableMappings` | `{}` | Exact absolute host executable paths mapped to absolute container executable paths, for example the packaged ripgrep binary to `/usr/bin/rg`. |
 | `workspaceParents` | `[]` | Host directories under which a dsh session may open a project (for example a code root). They authorise a session workspace but are never bind-mounted themselves, so a sibling project cannot become a model `workdir` mount. |
 | `protectedPaths` | `[]` | Host credential/control trees that must stay hidden from `ctx.fs` unless a trusted read path explicitly covers them. The OpenSandbox server guard should name the same paths to reject bind mounts of their parents. |
 | `allowDynamicMounts` | `true` | Offer the human `/directory-add`, `/directory-remove`, and `/directory-list` commands. The added mounts live only in this dsh process. |
@@ -293,6 +295,20 @@ boundary to include the host Nix daemon and/or host credentials:
 
 Prefer an explicit human-launched elevated session (or `/directory-add` on exact directories) over
 making any of these grants the default for ordinary agent sessions.
+
+## Local source integration
+
+See [dev/local-sandbox/README.md](dev/local-sandbox/README.md) for the source DSH launcher, working image, and real OpenSandbox verification. Host and container Workspace paths are identical. The optional [workspace-access.mjs](workspace-access.mjs) entry provides static directory grants and a filtered directory picker through the source DSH `WorkspacePathPolicy` service. Authorized roots and descendants are selectable; ancestors expose only branches leading to grants and cannot be selected or modified. Backend checks reject manually submitted paths and outward symlinks. This grants directories to one deployment context; it does not implement login or Session ownership.
+
+This integration uses the current DSH Agent initiator API to derive the immutable workspace from the calling Session; a command's `workdir` cannot authorize another workspace. `sessionWorkspaceOnly: true` excludes the fallback workspace from ordinary Session mounts and file permissions. Extra configured mounts and trusted read paths remain explicit shared grants; disable dynamic mounts for isolated Sessions.
+
+A newly created sandbox is usable only after both the lifecycle state is `Running` and execd answers `/ping`. Readiness probes retry within `sandboxWaitMs`; commands are submitted once. Failed startup deletes the created sandbox, and a failed deletion is reported with the sandbox identity.
+
+Execd command stdout and stderr are line-oriented. The subprocess provider restores the omitted line separator so multiline output and ripgrep JSON lines remain separate. A final line without a newline is normalized to a newline; this command transport does not preserve byte-exact output. PTY output uses the separate binary WebSocket transport.
+
+During an Agent turn, context-free instruction and skill discovery remains confined to that Session. A denied discovery probe is reported as missing so ancestor scans can finish; explicit file-tool paths still receive a sandbox denial.
+
+This plugin isolates execution and model-facing file access. `workspaceParents` still grants context-free harness discovery, so login, Session ownership, directory selection, and API authorization must be enforced separately in a multi-user deployment.
 
 ## Publishing
 
