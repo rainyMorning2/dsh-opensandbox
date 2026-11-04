@@ -296,6 +296,10 @@ boundary to include the host Nix daemon and/or host credentials:
 Prefer an explicit human-launched elevated session (or `/directory-add` on exact directories) over
 making any of these grants the default for ordinary agent sessions.
 
+## Configured users in one DSH process
+
+The opt-in `./user-access` entry adds configured accounts, persistent browser sessions and per-user Workspace/Session access to the matching Harness branch. It requires provider authentication, the restricted standard preset and the OpenSandbox world; it does not grant owner access or expose the global attachment store. See [single-process deployment](dev/users/README.md) for configuration, recovery, tests and the deferred valuation-plugin I/O scope. The ordinary sandbox bundle alone does not enable this login entry.
+
 ## Local source integration
 
 See [dev/local-sandbox/README.md](dev/local-sandbox/README.md) for the source DSH launcher, working image, and real OpenSandbox verification. Host and container Workspace paths are identical. The optional [workspace-access.mjs](workspace-access.mjs) entry provides static directory grants and a filtered directory picker through the source DSH `WorkspacePathPolicy` service. Authorized roots and descendants are selectable; ancestors expose only branches leading to grants and cannot be selected or modified. Backend checks reject manually submitted paths and outward symlinks. This grants directories to one deployment context; it does not implement login or Session ownership.

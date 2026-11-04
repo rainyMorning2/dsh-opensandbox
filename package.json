@@ -26,7 +26,8 @@
   "exports": {
     ".": "./index.mjs",
     "./package.json": "./package.json",
-    "./workspace-access": "./workspace-access.mjs"
+    "./workspace-access": "./workspace-access.mjs",
+    "./user-access": "./user-access.mjs"
   },
   "files": [
     "index.mjs",
@@ -34,7 +35,9 @@
     "src/",
     "README.md",
     "LICENSE",
-    "workspace-access.mjs"
+    "workspace-access.mjs",
+    "user-access.mjs",
+    "dev/users/"
   ],
   "dsh": {
     "bundle": {
@@ -48,9 +51,11 @@
     "access": "public"
   },
   "scripts": {
-    "check": "for f in index.mjs workspace-access.mjs src/*.mjs; do node --check \"$f\" || exit 1; done",
+    "check": "for f in index.mjs workspace-access.mjs user-access.mjs src/*.mjs src/users/*.mjs dev/users/*.mjs; do node --check \"$f\" || exit 1; done",
     "test": "node test/mount-policy.mjs && node test/bundle.mjs && node test/mock-e2e.mjs && node test/readiness.mjs && node test/workspace-paths.mjs && node test/workspace-access.mjs",
-    "pack:check": "npm pack --dry-run"
+    "pack:check": "npm pack --dry-run",
+    "test:users": "node --test test/users.mjs",
+    "test:users-live": "node test/users-live.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"
@@ -64,7 +69,12 @@
     "@deepseek-ai/dsh-fs-local": "*",
     "@deepseek-ai/dsh-workspace": "*",
     "@deepseek-ai/dsh-host-directory-picker": "*",
-    "@deepseek-ai/dsh-host-directory-picker-browse": "*"
+    "@deepseek-ai/dsh-host-directory-picker-browse": "*",
+    "@deepseek-ai/dsh-client-connection": "*",
+    "@deepseek-ai/dsh-api-remote-access": "*",
+    "@deepseek-ai/dsh-session-query": "*",
+    "@deepseek-ai/dsh-agent": "*",
+    "@deepseek-ai/dsh-host-webserver": "*"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -92,6 +102,21 @@
       "optional": true
     },
     "@deepseek-ai/dsh-host-directory-picker-browse": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-connection": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-remote-access": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-session-query": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-host-webserver": {
       "optional": true
     }
   }

@@ -2,6 +2,12 @@
 
 更新日期：2026-11-03。本文件记录当前本地实现、验证结果及待推进事项。
 
+## 单进程配置账号入口
+
+新增`user-access.mjs`提供配置文件账号、持久登录Cookie、用户Workspace策略及非owner资源授权，使用与本分支匹配的宿主browser identity provider接口。全新部署通过`dev/users/launch.py`启动，配置、恢复语义和验收边界见[单进程部署说明](../dev/users/README.md)。本文件下文的固定权限表、旧本机端口及既有探针描述原`dev/local-sandbox`入口；该入口不自动启用多用户登录。
+
+首版保留服务端登录状态、会话和Workspace，刷新及重启均可恢复；不迁移此前运行实例。用户间目录、会话、文件接口和实时事件受授权检查。未隔离的附件入口关闭，估值插件自身I/O和完整Docker容器验收仍待后续。
+
 ## 目标与对应关系
 
 保留 DSH 的 Workspace 与 Session 概念。后续由外部用户系统初始化默认 Workspace，并可授权多个 Workspace；当前使用固定权限表，不接登录。

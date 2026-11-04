@@ -73,7 +73,12 @@ export class AuthorizedDirectoryPicker extends BrowseDirectoryPicker {
     }
   }
 
-  capability() { return this.browse }
+  capability() {
+    return { kind: 'browse',
+      list: (path, signal) => this.listAuthorized(path, signal),
+      createDirectory: (path, name) => this.createAuthorized(path, name),
+    }
+  }
 
   async listAuthorized(path, signal) {
     const policy = this.ctx.workspacePathPolicy
