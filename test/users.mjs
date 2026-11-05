@@ -69,8 +69,14 @@ test('policy gives only own resources and rejects administration, presets and un
   for (const action of ['settings/update', 'settings/replace', 'settings/mutate', 'session/initializeDefaultModel']) assert.equal(grants.some(g => g.role.actions.includes(action)), false)
   assert.equal(grants[0].role.actions.includes('workspaceFiles/changes'), false)
   assert.equal(grants.find(g => g.resource.id === 'sa').role.actions.includes('workspaceFiles/changes'), true)
+  for (const action of ['event:approval/request', 'event:user-questions/request', 'userQuestions/attachWait', 'userQuestions/answer']) {
+    assert.equal(grants[0].role.actions.includes(action), false)
+    assert.equal(grants.find(g => g.resource.id === 'sa').role.actions.includes(action), true)
+  }
   const condition = grants[0].condition
   assert.equal(condition({ action: 'commands/execute', args: { line: '/plan', submittedAttachments: [] } }).kind, 'allow')
+  for (const mode of ['workspace-write', 'danger-full-access']) assert.equal(condition({ action: 'commands/execute', args: { line: '/permission ' + mode } }).kind, 'allow')
+  assert.equal(condition({ action: 'commands/execute', args: { line: '/permission read-only' } }).kind, 'deny')
   assert.equal(condition({ action: 'commands/execute', args: { line: '/permission unrestricted', submittedAttachments: [] } }).kind, 'deny')
   assert.equal(condition({ action: 'session/create', args: { request: { cwd: f.b } } }).kind, 'deny')
   assert.equal(condition({ action: 'session/create', args: { request: { agentPreset: 'host' } } }).kind, 'deny')

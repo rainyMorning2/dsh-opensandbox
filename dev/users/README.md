@@ -71,7 +71,7 @@ python3 dev/users/launch.py \
 
 ## 首版范围
 
-这不是完整估值应用租户隔离。首版不加载估值插件；其直接Node/Python I/O、专有页面和RPC留待后续审查。不开放全局图片附件读取、上传及非文本prompt内容，也不开放全局文件下载捷径；这些入口在完成资源归属校验后才能启用。Workspace文件预览与终端按Session资源授权。设置页面与插件管理对所有登录用户关闭；仅返回只读界面显示默认值，不开放部署配置和凭据。安全会话命令包括/plan、/goal、/compact、/feedback；全局管理命令仍拒绝。
+这不是完整估值应用租户隔离。首版不加载估值插件；其直接Node/Python I/O、专有页面和RPC留待后续审查。不开放全局图片附件读取、上传及非文本prompt内容，也不开放全局文件下载捷径；这些入口在完成资源归属校验后才能启用。Workspace文件预览与终端按Session资源授权。设置页面与插件管理对所有登录用户关闭；仅返回只读界面显示默认值，不开放部署配置和凭据。安全会话命令包括/plan、/goal、/compact、/feedback，以及仅接受workspace-write或danger-full-access的/permission；全局管理命令仍拒绝。
 
 用户的密码、Workspace及启停由管理员配置；不提供注册、找回密码、动态权限编辑或跨用户共享。该实现信任管理员配置、已安装插件和OpenSandbox控制服务，不给登录用户安装任意宿主插件的能力。
 
@@ -98,3 +98,7 @@ node test/users-live.mjs
 ## 两档权限测试配置
 
 用户启动器要求secureExecution：独立execd令牌、非root工作负载及完全生效的Landlock。执行镜像需包含/opt/dsh-policy/landlock-run，文件和父目录由root所有且普通用户不可写。UID/GID取DSH应用的运行身份，应与持久工作区所有者一致。Full不提升Unix身份，仅取消命令级Landlock限制；两档都不能通过execd访问其他沙箱。
+
+仅提供workspace-write＋ask与danger-full-access＋never，不提供只读选项，设置和插件管理继续关闭。已有Session不会被批量重写；先前固定workspace-write＋never的Session需重新选择工作区模式以采用ask。更换应用与执行镜像后须回收旧无认证沙箱。网络本身仍使用bridge，不宣称禁止所有跨沙箱通信。
+
+审批与提问按所属 Session 授权投递和回答；提问等待与延后回答接口同样限定为用户自己的 Session。需要包含交互资源授权扩展的 DSH 网关，不能仅通过开放事件名称启用非 owner 交互。

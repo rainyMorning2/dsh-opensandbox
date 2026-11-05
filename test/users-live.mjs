@@ -98,6 +98,22 @@ try {
   }
   for (const [index, user] of users.entries()) {
     const other = users[1 - index]
+    const foreignAnswer = await rpc(user.id, 'userQuestions/answer', { agentId: ids[other.id], callId: 'interaction-test-call', answer: { answers: [] } })
+    check(!foreignAnswer.ok && foreignAnswer.error.code === 'remote-access/denied', 'other user question answer denied before dispatch')
+    const permissions = await rpc(user.id, 'permissionPresets/catalog', {})
+    check(permissions.ok, 'permission catalogue available')
+    check(permissions.value.defaultPreset === 'workspace-write', 'workspace permission is the default')
+    check(permissions.value.defaultOptions.length === 2, 'only two permission modes exposed')
+    for (const preset of ['danger-full-access', 'workspace-write']) {
+      const changed = await rpc(user.id, 'commands/execute', { agentId: ids[user.id], line: '/permission ' + preset, submittedAttachments: [] })
+      check(changed.ok && changed.value.result.kind === 'success', 'own permission switch ' + preset + ': ' + JSON.stringify(changed))
+      const projection = await rpc(user.id, 'session/projections', { request: { sessionId: ids[user.id] } })
+      check(projection.ok && projection.value.values.permissions.currentValue === preset, 'permission projection follows selection')
+    }
+    for (const [sessionId, line] of [[ids[other.id], '/permission danger-full-access'], [ids[user.id], '/permission read-only']]) {
+      const denied = await rpc(user.id, 'commands/execute', { agentId: sessionId, line, submittedAttachments: [] })
+      check(!denied.ok && denied.error.code !== 'gateway/arguments-invalid', 'other session/readonly selection rejected')
+    }
     const list = await rpc(user.id, 'session/list', { _request: {} })
     check(list.ok && list.value.items.every(item => item.cwd === user.defaultWorkspace), 'session list isolates users')
     const settings = await rpc(user.id, 'settings/describe', {})

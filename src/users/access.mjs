@@ -4,6 +4,7 @@ export const globalRole = role('global', [
   'session/create', 'workspace/follow', 'workspace/create', 'workspace/initializeDefault',
   'directoryPicker/list', 'directoryPicker/createDirectory',
   'settings/describe', 'event:settings/document-updated',
+  'permissionPresets/catalog', 'event:permission-presets/catalog-changed',
 ])
 export const sessionRole = role('session', [
   'session/list', 'session/search', 'session/control', 'session/create', 'session/rename', 'session/prompt', 'session/cancel',
@@ -17,7 +18,7 @@ export const sessionRole = role('session', [
   'terminal/environment', 'terminal/shells', 'terminal/list', 'terminal/create', 'terminal/retain',
   'terminal/attach', 'terminal/rename', 'terminal/close',
   'event:api-session/activity', 'event:api-session/added', 'event:api-session/error',
-  'event:api-session/removed', 'event:api-session/status',
+  'event:api-session/removed', 'event:api-session/status', 'event:approval/request', 'event:user-questions/request', 'userQuestions/attachWait', 'userQuestions/answer',
 ])
 export const workspaceRole = role('workspace', ['workspace/follow', 'session/create', 'workspace/rename', 'workspace/delete', 'workspace/insertBefore', 'workspace/insertSessionBefore'])
 
@@ -35,7 +36,7 @@ export class UserAccess {
       const request = args?.request
       if (action === 'commands/execute') {
         const command = typeof args?.line === 'string' ? /^\s*\/([a-z][a-z0-9_-]*)(?:\s|$)/.exec(args.line)?.[1] : undefined
-        if (!['plan', 'goal', 'compact', 'feedback'].includes(command) || args?.submittedAttachments?.length) return { kind: 'deny', reason: 'command-not-session-local' }
+        if ((!['plan', 'goal', 'compact', 'feedback'].includes(command) && !(command === 'permission' && /^\s*\/permission\s+(workspace-write|danger-full-access)\s*$/.test(args.line))) || args?.submittedAttachments?.length) return { kind: 'deny', reason: 'command-not-session-local' }
       }
       if (action === 'session/create' && request) {
         if (request.agentPreset !== undefined && request.agentPreset !== 'standard') return { kind: 'deny', reason: 'preset-not-allowed' }

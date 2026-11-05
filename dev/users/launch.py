@@ -39,7 +39,7 @@ if workspace_client.is_symlink():
     workspace_client.unlink()
 workspace_client.symlink_to(workspace_package / 'lib/client.js')
 disabled = ['subprocess', 'sandbox', 'fs-sandbox', 'settings-controller', 'workspace-controller', 'agent-default-model', 'harness-dev-context', 'directory-picker', 'directory-picker-browse',
-    'tool-plugin-manager', 'tool-jobs', 'ui-plugin-manager', 'ui-cordis', 'ui-permission', 'ui-agent-preset',
+    'tool-plugin-manager', 'tool-jobs', 'ui-plugin-manager', 'ui-cordis', 'ui-agent-preset',
     'ui-settings-account', 'ui-settings-general', 'ui-settings-models', 'ui-settings-plugin-inventory',
     'ui-settings-session-log', 'ui-settings-plugins', 'ui-settings-shell', 'ui-settings-agent-loop',
     'ui-settings-subagent', 'ui-settings-web-search', 'ui-jobs', 'ui-schedule', 'preset-cordis', 'preset-ptc', 'preset-minimal', 'cordis-client-runner']
@@ -49,8 +49,8 @@ patch += [{'id': 'preset-standard', 'config': standard},
           {'id': 'terminal-controller', 'config': {'shell': {'path': '/bin/bash', 'name': 'bash', 'args': ['-i']}, 'shellCandidates': ['/bin/bash', '/bin/sh']}}]
 patch += [
     {'id': 'connection', 'config': {'browserAuthentication': 'provider', 'trustedHosts': [__import__('urllib.parse', fromlist=['urlparse']).urlparse(a.origin).netloc]}},
-    {'id': 'approval', 'config': {'policy': 'never'}},
-    {'id': 'permission', 'config': {'defaultPreset': 'workspace-write', 'presets': {'workspace-write': {'sandbox': 'workspace-write', 'approval': 'never'}}}},
+    {'id': 'approval', 'config': {'policy': 'ask'}},
+    {'id': 'permission', 'config': {'defaultPreset': 'workspace-write', 'presets': {'workspace-write': {'sandbox': 'workspace-write', 'approval': 'ask'}, 'danger-full-access': {'sandbox': 'danger-full-access', 'approval': 'never'}}}},
     {'insert': [
         {'id': 'deployment-default-model', 'name': str(plugin / 'dev/users/default-model.mjs'), 'config': {
             'provider': os.environ.get('DSH_MODEL_PROVIDER') or 'deepseek-official',
