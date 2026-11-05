@@ -25,7 +25,8 @@ const server = createServer((req, res) => {
   if (ping) {
     const count = (probes.get(ping[1]) ?? 0) + 1
     probes.set(ping[1], count)
-    assert.equal(req.headers['open-sandbox-api-key'], 'test-key')
+    assert.equal(req.headers['open-sandbox-api-key'], undefined)
+    assert.equal(req.headers['x-execd-access-token'], 'sandbox-token')
     res.statusCode = ping[1] === 'probe2' ? 401 : ping[1] === 'probe3' || count < 3 ? 503 : 200
     res.end('{}'); return
   }
@@ -34,16 +35,18 @@ const server = createServer((req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
 try {
   const client = new OpenSandboxClient({ domain: `127.0.0.1:${server.address().port}`, apiKey: 'test-key', sandboxWaitMs: 3000 })
-  assert.equal(await client.createSandbox({}), 'probe1')
+  const body = { env: { EXECD_ACCESS_TOKEN: 'sandbox-token' } }
+  assert.equal(await client.createSandbox(body), 'probe1')
   assert.equal(probes.get('probe1'), 3)
-  await assert.rejects(client.createSandbox({}), error => error.status === 401)
+  await assert.rejects(client.createSandbox(body), error => error.status === 401)
   assert.equal(probes.get('probe2'), 1)
   assert.equal(deleted.has('probe2'), true)
   client.sandboxWaitMs = 300
-  await assert.rejects(client.createSandbox({}), error => error.name === 'TimeoutError')
+  await assert.rejects(client.createSandbox(body), error => error.name === 'TimeoutError')
   assert.equal(deleted.has('probe3'), true)
   await client.killSandbox('probe1')
   assert.equal(deleted.has('probe1'), true)
+  assert.equal(client.execdTokens.size, 0)
   console.log('readiness ok')
 } finally {
   server.closeAllConnections()

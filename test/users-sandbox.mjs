@@ -22,7 +22,7 @@ const ids = []
 let checks = 0
 const check = (condition, message) => { assert.ok(condition, message); checks++ }
 async function command(id, cwd, script) {
-  const response = await world.client.command(id, { command: script, cwd, timeout: 20 })
+  const response = await world.client.command(id, { command: script, cwd, timeout: 20_000 })
   let output = '', errors = ''
   for await (const event of sseEvents(response)) {
     if (event.type === 'stdout') output += commandOutputText(event)

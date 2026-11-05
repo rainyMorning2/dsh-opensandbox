@@ -45,6 +45,10 @@ export const inject = []
 
 /** Configuration schema resolved by the dsh loader. */
 export const Config = z.object({
+  /** Require per-sandbox credentials, unprivileged workloads and a verified policy launcher. */
+  secureExecution: z.boolean().required(false),
+  workloadUid: z.number().required(false),
+  workloadGid: z.number().required(false),
   /** OpenSandbox API key; falls back to OPEN_SANDBOX_API_KEY, then apiKeyFile. */
   apiKey: z.string().required(false),
   /** File holding the API key (e.g. $XDG_RUNTIME_DIR/opensandbox/api-key). */

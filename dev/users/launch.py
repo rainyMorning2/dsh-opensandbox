@@ -62,6 +62,7 @@ patch += [
         {'id': 'ui-directory-picker-browse', 'name': '@deepseek-ai/dsh-client-ui-directory-picker-browse'},
         {'id': 'opensandbox-world', 'name': str(plugin / 'index.mjs'), 'config': {
             'domain': a.sandbox_domain, 'image': a.image,
+            'secureExecution': True, 'workloadUid': os.getuid(), 'workloadGid': os.getgid(),
             'workspaceRoot': str(fallback), 'workspaceParents': roots,
             'sessionWorkspaceOnly': True, 'allowDynamicMounts': False,
             'protectedPaths': [str(home), str(a.users.resolve())],

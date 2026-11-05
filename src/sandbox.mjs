@@ -1,21 +1,7 @@
+import { POLICY_RUNNER } from './execution-policy.mjs'
 import { SandboxProvider } from '@deepseek-ai/dsh-sandbox'
 
-/**
- * Container-world confinement provider.
- *
- * dsh's per-command `ctx.sandbox.confine()` contract wraps an argv under a
- * file-effect policy. In this plugin the execution world itself is an
- * OpenSandbox container: confinement is established when the sandbox is
- * created (its workspace mount and resource boundary), not again for every
- * command inside it. `confine()` therefore passes the argv through untouched
- * and reports `partial` enforcement for confined modes, because the container
- * bounds host file effects but does not re-express read-only/workspace-only
- * semantics inside the container.
- *
- * Keeping this provider mounted lets dsh's stock `dsh-bash-sandbox`,
- * `dsh-terminal-bash`, and permission-escalation flow compose unchanged over
- * the OpenSandbox subprocess provider.
- */
+/** Container boundary, with opt-in per-command Landlock policies for secure workloads. */
 export class OpenSandboxSandboxProvider extends SandboxProvider {
   constructor(ctx, config = {}) {
     super(ctx)
@@ -26,6 +12,19 @@ export class OpenSandboxSandboxProvider extends SandboxProvider {
   async confine(argv, policy, signal) {
     signal?.throwIfAborted()
     const mode = policy?.mode ?? 'workspace-write'
+    if (this.config.secureExecution) {
+      if (!['read-only', 'workspace-write', 'danger-full-access'].includes(mode)) throw Error('Unsupported sandbox permission mode')
+      const world = this.ctx.subprocess
+      const sessionRoot = world.sessionRootFor({ sandboxPolicy: policy })
+      world.mountPolicy.assertMountableSessionRoot(sessionRoot)
+      const mapped = world.commandArgv(argv, sessionRoot)
+      const grant = mode === 'workspace-write' ? ['--rw', '/tmp', '--rw', sessionRoot] : []
+      return {
+        argv: mode === 'danger-full-access' ? mapped : [POLICY_RUNNER, '--ro', '/', '--rw', '/dev/null', ...grant, '--', ...mapped],
+        enforcement: 'full', denialSignatures: ['permission denied'],
+        runnerFailureRules: [{ allowedExitCodes: [125], fatalSignatures: ['landlock-run: '] }],
+      }
+    }
     return {
       argv: [...argv],
       enforcement: mode === 'danger-full-access' ? 'full' : 'partial',

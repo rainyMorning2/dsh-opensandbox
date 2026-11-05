@@ -117,6 +117,8 @@ export class OpenSandboxClient {
     this.protocol = this.baseUrl.startsWith('https') ? 'https' : 'http'
     this.requestTimeoutMs = Number(config.requestTimeoutMs) > 0 ? Number(config.requestTimeoutMs) : 300_000
     this.execdBases = new Map()
+    this.execdTokens = new Map()
+    this.execdEndpointHeaders = new Map()
     this.sandboxWaitMs = Number(config.sandboxWaitMs) > 0 ? Number(config.sandboxWaitMs) : 180_000
   }
 
@@ -164,6 +166,12 @@ export class OpenSandboxClient {
     return response
   }
 
+  /** Data-plane credentials are sandbox-specific; never forward the lifecycle API key. */
+  execdHeaders(id, extra = {}) {
+    return { ...this.execdEndpointHeaders.get(id), ...extra,
+      ...(this.execdTokens.has(id) ? { 'X-EXECD-ACCESS-TOKEN': this.execdTokens.get(id) } : {}) }
+  }
+
   /** Make one JSON lifecycle request and parse its JSON body. */
   async requestJson(method, path, options) {
     const response = await this.request(method, path, options)
@@ -176,6 +184,7 @@ export class OpenSandboxClient {
     const created = await this.requestJson('POST', '/sandboxes', { body, signal, timeoutMs: this.requestTimeoutMs })
     const id = textOr(created?.id, '')
     if (id.length === 0) throw new OpenSandboxError('OpenSandbox: create response did not include a sandbox id')
+    if (body.env?.EXECD_ACCESS_TOKEN) this.execdTokens.set(id, body.env.EXECD_ACCESS_TOKEN)
     try {
       await this.waitForSandbox(id, signal)
       await this.waitForExecd(id, signal)
@@ -200,7 +209,7 @@ export class OpenSandboxClient {
       budget.throwIfAborted()
       try {
         const response = await fetch(`${base}/ping`, {
-          headers: this.headers(),
+          headers: this.execdHeaders(id),
           signal: AbortSignal.any([budget, AbortSignal.timeout(Math.min(this.requestTimeoutMs, this.sandboxWaitMs))]),
         })
         await response.arrayBuffer()
@@ -246,14 +255,16 @@ export class OpenSandboxClient {
     try {
       await this.request('DELETE', `/sandboxes/${encodeURIComponent(id)}`, { signal })
     } catch (error) {
-      if (error instanceof OpenSandboxError && error.status === 404) return
-      throw error
+      if (!(error instanceof OpenSandboxError && error.status === 404)) throw error
     }
+    this.forgetEndpoint(id)
+    this.execdTokens.delete(id)
   }
 
   /** Drop the cached execd endpoint for one sandbox. */
   forgetEndpoint(id) {
     this.execdBases.delete(id)
+    this.execdEndpointHeaders.delete(id)
   }
 
   /** Resolve (and cache) the server-proxied execd base for one sandbox. */
@@ -272,6 +283,7 @@ export class OpenSandboxClient {
     if (!host.startsWith('http://') && !host.startsWith('https://')) host = `${this.protocol}://${host}`
     const base = host.replace(/\/+$/, '')
     this.execdBases.set(id, base)
+    this.execdEndpointHeaders.set(id, endpoint.headers ?? {})
     return base
   }
 
@@ -292,7 +304,7 @@ export class OpenSandboxClient {
     try {
       response = await fetch(`${base}/command`, {
         method: 'POST',
-        headers: this.headers({ Accept: 'text/event-stream', 'Content-Type': 'application/json' }),
+        headers: this.execdHeaders(id, { Accept: 'text/event-stream', 'Content-Type': 'application/json' }),
         body: JSON.stringify(body),
         signal: controller.signal,
       })
@@ -319,7 +331,7 @@ export class OpenSandboxClient {
     try {
       await fetch(`${base}/command?id=${encodeURIComponent(executionId)}`, {
         method: 'DELETE',
-        headers: this.headers(),
+        headers: this.execdHeaders(id),
         signal: signal ?? AbortSignal.timeout(30_000),
       })
     } catch {
@@ -332,7 +344,7 @@ export class OpenSandboxClient {
     const base = await this.execdBase(id, signal)
     const response = await fetch(`${base}/pty`, {
       method: 'POST',
-      headers: this.headers({ 'Content-Type': 'application/json' }),
+      headers: this.execdHeaders(id, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
       signal: signal ?? AbortSignal.timeout(60_000),
     })
@@ -354,7 +366,7 @@ export class OpenSandboxClient {
     try {
       await fetch(`${base}/pty/${encodeURIComponent(sessionId)}`, {
         method: 'DELETE',
-        headers: this.headers(),
+        headers: this.execdHeaders(id),
         signal: signal ?? AbortSignal.timeout(30_000),
       })
     } catch {

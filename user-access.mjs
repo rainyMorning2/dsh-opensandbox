@@ -53,6 +53,7 @@ export class UserWorkspacePolicy extends WorkspacePathPolicy {
 
 export function assertUserSandbox(ctx, accounts) {
   if (!(ctx.subprocess instanceof OpenSandboxSubprocess) || !(ctx.fs instanceof OpenSandboxFileSystem)) throw Error('User access requires OpenSandbox subprocess and filesystem providers')
+  if (!ctx.subprocess.config.secureExecution) throw Error('User access requires authenticated unprivileged sandbox execution')
   if (!ctx.subprocess.config.apiKey) throw Error('User sandboxes require an OpenSandbox API key')
   const policy = ctx.subprocess.mountPolicy
   if (ctx.fs.mountPolicy !== policy || policy.allowDynamic || !policy.sessionWorkspaceOnly) throw Error('User access requires a shared, session-only mount policy without dynamic grants')

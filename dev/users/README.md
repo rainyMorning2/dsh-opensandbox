@@ -85,7 +85,7 @@ node test/users-live.mjs
 
 `users-live`启动真实源码DSH profile，以两名合成用户验证86项HTTP/RPC与重启检查，运行结束清理临时服务和数据；不调用模型或OpenSandbox服务。设置`DSH_USERS_BROWSER=1`加入浏览器登录、默认目录、刷新及退出，共93项，包含完全空状态的首次浏览器登录；需要宿主apps/web的Playwright及其浏览器系统依赖，可用`DSH_TEST_CHROMIUM`指定现有浏览器二进制。
 
-本轮已通过上述用户逻辑、真实宿主和浏览器检查，以及既有插件的挂载/文件后端/mock-execd回归。真实Docker容器与execd双用户专项尚未运行，不能用mock或浏览器结果代替。新增源码需重新构建宿主；生产HTTPS代理、镜像构建、配额与容器过期重建还需在目标部署环境验收。
+本轮已通过上述用户逻辑、真实宿主和浏览器检查，以及既有插件的挂载/文件后端/mock-execd回归。在Value-Agent联合测试部署中已执行14项真实Docker/execd双工作区检查，覆盖挂载隔离、符号链接拒绝、持久写入和沙箱重建；test/users-sandbox.mjs的命令timeout采用毫秒单位。具体部署证据由Value-Agent的deploy/users记录；这些结果不替代估值插件业务隔离验收。新增源码需重新构建宿主；生产HTTPS代理、镜像构建、配额与容器过期重建还需在目标部署环境验收。
 
 ## 联合部署的交互权限
 
@@ -94,3 +94,7 @@ node test/users-live.mjs
 单独关闭的能力及原因：全局设置、插件安装和启停会影响共享DSH进程；其他Agent preset和任意管理命令可能绕过沙箱约束；调度和全局附件接口尚未完成归属适配。这些能力保持关闭，不设置管理员特例或插件锁定。估值专属接口与业务适配另行处理。
 
 本机补充：调整为只读显示设置后，隔离容器中92项真实HTTP/RPC检查通过；联合部署浏览器另验证目录弹窗、Session模型/思考强度与刷新、文件预览、沙箱终端命令。此结果不包含模型推理和估值业务验收。
+
+## 两档权限测试配置
+
+用户启动器要求secureExecution：独立execd令牌、非root工作负载及完全生效的Landlock。执行镜像需包含/opt/dsh-policy/landlock-run，文件和父目录由root所有且普通用户不可写。UID/GID取DSH应用的运行身份，应与持久工作区所有者一致。Full不提升Unix身份，仅取消命令级Landlock限制；两档都不能通过execd访问其他沙箱。

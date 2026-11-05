@@ -1,3 +1,5 @@
+import { randomBytes } from 'node:crypto'
+import { POLICY_RUNNER, workloadCommand } from './execution-policy.mjs'
 import { constants as fsConstants, accessSync } from 'node:fs'
 import { homedir, userInfo } from 'node:os'
 import { delimiter, isAbsolute, join } from 'node:path'
@@ -137,7 +139,14 @@ function normalizeConfig(config = {}) {
       throw new OpenSandboxError('OpenSandbox: executableMappings keys and values must be absolute paths')
     }
   }
+  const secureExecution = config.secureExecution === true
+  const workloadUid = config.workloadUid ?? process.getuid?.()
+  const workloadGid = config.workloadGid ?? process.getgid?.()
+  if (secureExecution && (![workloadUid, workloadGid].every(id => Number.isSafeInteger(id) && id > 0))) {
+    throw new OpenSandboxError('Secure execution requires positive workload UID and GID')
+  }
   return {
+    secureExecution, workloadUid, workloadGid,
     executableMappings,
     workspaceRoot,
     image: textOr(config.image, DEFAULT_IMAGE),
@@ -158,7 +167,7 @@ function normalizeConfig(config = {}) {
     hostSearchDirs,
     containerEnv: {
       PATH: containerPath.join(delimiter),
-      HOME: textOr(config.home, '/root'),
+      HOME: textOr(config.home, secureExecution ? '/home/dsh' : '/root'),
       TERM: 'dumb',
       LANG: 'C.UTF-8',
       ...containerEnvOverrides,
@@ -210,11 +219,12 @@ export class OpenSandboxSubprocess extends SubprocessRuntime {
 
   /** Execute one argv in the sandbox and collect its output. Internal helper. */
   async runCollect(argv, { cwd = this.config.workspaceRoot, env = {}, signal, timeoutMs = 0 } = {}) {
-    const sandboxId = await this.ensureSandboxFor(cwd, this.config.workspaceRoot)
+    const sessionRoot = this.sessionRootFor({ cwd })
+    const sandboxId = await this.ensureSandboxFor(cwd, sessionRoot)
     const body = {
-      command: shellJoin(this.commandArgv(argv, this.config.workspaceRoot)),
+      command: workloadCommand(this.commandArgv(argv, sessionRoot), { ...this.config.containerEnv, ...env }, this.config),
       cwd: cwd,
-      envs: { ...this.config.containerEnv, ...env },
+      envs: this.config.secureExecution ? {} : { ...this.config.containerEnv, ...env },
     }
     if (timeoutMs > 0) body.timeout = Math.floor(timeoutMs)
     const response = await this.client.command(sandboxId, body, signal)
@@ -320,14 +330,36 @@ export class OpenSandboxSubprocess extends SubprocessRuntime {
       entrypoint: ['/bin/sh', '-c', 'exec sleep infinity'],
       resourceLimits: { cpu: this.config.cpu, memory: this.config.memory },
       timeout: this.config.timeoutSeconds,
-      env: this.config.containerEnv,
+      env: { ...this.config.containerEnv, ...(this.config.secureExecution ? { EXECD_ACCESS_TOKEN: randomBytes(32).toString('hex') } : {}) },
       metadata: {
         name: `dsh-opensandbox-${process.pid}`,
         'codebam.dsh.workspace': sanitizeMetadataValue(target.sessionRoot),
       },
       volumes,
     }
-    return this.client.createSandbox(body)
+    const id = await this.client.createSandbox(body)
+    if (!this.config.secureExecution) return id
+    try {
+      const base = await this.client.execdBase(id)
+      const unauthenticated = await fetch(`${base}/metrics`, { signal: AbortSignal.timeout(5000) })
+      await unauthenticated.body?.cancel()
+      if (unauthenticated.status !== 401) throw new OpenSandboxError('Sandbox execution API must reject unauthenticated access')
+      const uid = this.config.workloadUid, gid = this.config.workloadGid
+      const home = shellJoin([this.config.containerEnv.HOME])
+      const command = `test -x ${POLICY_RUNNER} && test "$(stat -c %u ${POLICY_RUNNER})" = 0 && mkdir -p ${home} && chown ${uid}:${gid} ${home} && ${POLICY_RUNNER} --probe`
+      const response = await this.client.command(id, { command, cwd: '/', timeout: 10_000 })
+      let output = '', exitCode
+      for await (const event of sseEvents(response)) {
+        if (event.type === 'stdout') output += commandOutputText(event)
+        if (event.type === 'execution_complete') exitCode = 0
+        if (event.type === 'error') throw new OpenSandboxError('Sandbox security initialization failed')
+      }
+      if (exitCode !== 0 || !output.includes('landlock: fully enforced')) throw new OpenSandboxError('Sandbox requires fully enforced Landlock')
+      return id
+    } catch (error) {
+      await this.client.killSandbox(id)
+      throw error
+    }
   }
 
   /**
@@ -560,11 +592,11 @@ class OpenSandboxCommandProcess {
       const sessionRoot = this.provider.sessionRootFor(this.spec)
       this.sandboxId = await this.provider.ensureSandboxFor(this.spec.cwd, sessionRoot)
       const env = { ...this.provider.config.containerEnv, ...(this.spec.env ?? {}) }
-      const command = shellJoin(this.provider.commandArgv(this.spec.argv, sessionRoot))
+      const command = workloadCommand(this.provider.commandArgv(this.spec.argv, sessionRoot), env, this.provider.config)
       const body = {
         command,
         cwd: this.spec.cwd,
-        envs: env,
+        envs: this.provider.config.secureExecution ? {} : env,
       }
       if (this.provider.config.commandTimeoutMs > 0) body.timeout = this.provider.config.commandTimeoutMs
       const stdin = this.spec.stdio?.stdin
@@ -707,11 +739,10 @@ class OpenSandboxTerminalHandle {
       }
       const argv = Array.isArray(this.spec.argv) && this.spec.argv.length > 0 ? this.spec.argv : ['/bin/bash', '--noprofile', '--norc', '-i']
       const mappedArgv = this.provider.commandArgv(argv, sessionRoot)
-      const assignments = Object.entries(env).map(([key, value]) => `${key}=${String(value)}`)
-      const command = `exec ${shellJoin(['env', ...assignments, ...mappedArgv])}`
+      const command = `exec ${this.provider.config.secureExecution ? workloadCommand(mappedArgv, env, this.provider.config) : shellJoin(['env', ...Object.entries(env).map(([key, value]) => `${key}=${String(value)}`), ...mappedArgv])}`
       this.sessionId = await this.client.createPty(this.sandboxId, { cwd: this.spec.cwd, command })
       const url = await this.client.ptyWsUrl(this.sandboxId, this.sessionId)
-      this.ws = new WebSocket(url, { headers: this.client.headers() })
+      this.ws = new WebSocket(url, { headers: this.client.execdHeaders(this.sandboxId) })
       this.ws.binaryType = 'nodebuffer'
       await new Promise((resolveOpen, rejectOpen) => {
         const onOpen = () => {
