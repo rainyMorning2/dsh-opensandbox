@@ -1,22 +1,25 @@
 const role = (resource, actions) => ({ name: `deployment-user:${resource}`, resource, actions })
 export const globalRole = role('global', [
-  'session/list', 'session/control', 'session/modelCatalog', 'session/canOpenWorkspacePath',
+  'session/list', 'session/search', 'session/control', 'session/modelCatalog', 'session/canOpenWorkspacePath',
   'session/create', 'workspace/follow', 'workspace/create', 'workspace/initializeDefault',
   'directoryPicker/list', 'directoryPicker/createDirectory',
+  'settings/describe', 'event:settings/document-updated',
 ])
 export const sessionRole = role('session', [
-  'session/list', 'session/control', 'session/create', 'session/rename', 'session/prompt', 'session/cancel',
-  'session/page', 'session/events', 'session/follow', 'session/state', 'session/observeEvent',
+  'session/list', 'session/search', 'session/control', 'session/create', 'session/rename', 'session/prompt', 'session/cancel',
+  'session/fork', 'session/updateQueue', 'commands/list', 'commands/execute',
+  'workspace/archiveSession', 'workspace/unarchiveSession', 'workspace/pinSession', 'workspace/unpinSession', 'workspace/insertSessionBefore',
+  'session/selectModel', 'session/page', 'session/events', 'session/follow', 'session/state', 'session/observeEvent',
   'session/observeState', 'session/observeProjections', 'session/projections', 'session/wait',
   'workspace/follow', 'skills/list', 'toolResults/watch', 'goals/get',
   'workspaceFiles/list', 'workspaceFiles/stat', 'workspaceFiles/read', 'workspaceFiles/readBytes',
-  'workspaceFiles/readAll', 'workspaceFiles/watch',
+  'workspaceFiles/readAll', 'workspaceFiles/watch', 'workspaceFiles/changes',
   'terminal/environment', 'terminal/shells', 'terminal/list', 'terminal/create', 'terminal/retain',
   'terminal/attach', 'terminal/rename', 'terminal/close',
   'event:api-session/activity', 'event:api-session/added', 'event:api-session/error',
   'event:api-session/removed', 'event:api-session/status',
 ])
-export const workspaceRole = role('workspace', ['workspace/follow', 'session/create'])
+export const workspaceRole = role('workspace', ['workspace/follow', 'session/create', 'workspace/rename', 'workspace/delete', 'workspace/insertBefore', 'workspace/insertSessionBefore'])
 
 /** Explicit allowlist: attachments, arbitrary commands, presets and administration stay denied. */
 export class UserAccess {
@@ -30,6 +33,10 @@ export class UserAccess {
     if (!user?.enabled) return []
     const condition = ({ action, args }) => {
       const request = args?.request
+      if (action === 'commands/execute') {
+        const command = typeof args?.line === 'string' ? /^\s*\/([a-z][a-z0-9_-]*)(?:\s|$)/.exec(args.line)?.[1] : undefined
+        if (!['plan', 'goal', 'compact', 'feedback'].includes(command) || args?.submittedAttachments?.length) return { kind: 'deny', reason: 'command-not-session-local' }
+      }
       if (action === 'session/create' && request) {
         if (request.agentPreset !== undefined && request.agentPreset !== 'standard') return { kind: 'deny', reason: 'preset-not-allowed' }
         if (request.cwd !== undefined && !this.accounts.allows(user, request.cwd)) return { kind: 'deny', reason: 'workspace-denied' }

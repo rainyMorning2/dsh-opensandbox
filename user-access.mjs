@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { Accounts, contains } from './src/users/accounts.mjs'
 import { LoginSessions } from './src/users/sessions.mjs'
 import { UserLogin } from './src/users/http.mjs'
+import { UserDisplaySettings } from './src/users/settings.mjs'
 import { UserAccess } from './src/users/access.mjs'
 import { AuthorizedDirectoryPicker } from './workspace-access.mjs'
 import { OpenSandboxSubprocess } from './src/subprocess.mjs'
@@ -94,11 +95,11 @@ export async function apply(ctx, config) {
   ctx.remoteAccess.registerPolicy('deployment-user', access)
   ctx.on('domain/changed', change => { if (change.domain === 'workspace') ctx.remoteAccess.invalidate() }, { global: true })
   const sessions = new LoginSessions(config.sessionDatabase, accounts, config)
+  await ctx.plugin(UserDisplaySettings, { accounts }).await()
   const login = new UserLogin(accounts, sessions, ctx.connection, config)
   const timer = setInterval(() => { login.sweep().catch(error => ctx.logger.error('Login expiry cleanup failed', error)) }, 1000)
   timer.unref()
   ctx.effect(() => async () => { clearInterval(timer); await login.close(); sessions.close() }, 'user login lifetime')
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/auth', handler: (req, res) => login.handle(req, res) }), 'user login routes')
   ctx.connection.registerBrowserIdentity(login)
-  ctx.effect(() => ctx.webServer.tapIndex(html => html.replace('</body>', '<a href="/auth/logout" style="position:fixed;right:16px;top:12px;z-index:10000;background:Canvas;color:CanvasText;padding:6px 10px;border:1px solid GrayText;border-radius:6px">退出登录</a></body>')), 'user logout link')
 }

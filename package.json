@@ -74,7 +74,11 @@
     "@deepseek-ai/dsh-api-remote-access": "*",
     "@deepseek-ai/dsh-session-query": "*",
     "@deepseek-ai/dsh-agent": "*",
-    "@deepseek-ai/dsh-host-webserver": "*"
+    "@deepseek-ai/dsh-host-webserver": "*",
+    "@deepseek-ai/dsh-api-settings-controller": "*",
+    "@deepseek-ai/dsh-typert-protocol": "*",
+    "@deepseek-ai/dsh-agent-default-model": "*",
+    "@deepseek-ai/dsh-api-workspace-controller": "*"
   },
   "peerDependenciesMeta": {
     "@deepseek-ai/cordis": {
@@ -117,6 +121,18 @@
       "optional": true
     },
     "@deepseek-ai/dsh-host-webserver": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-settings-controller": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-typert-protocol": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-agent-default-model": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-api-workspace-controller": {
       "optional": true
     }
   }

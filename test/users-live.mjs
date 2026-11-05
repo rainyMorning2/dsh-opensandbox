@@ -7,6 +7,7 @@ import { createServer } from 'node:net'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { createRequire } from 'node:module'
+import { fileWatch } from './user-file-watch.mjs'
 import { hashPassword } from '../src/users/accounts.mjs'
 
 const plugin = resolve(import.meta.dirname, '..')
@@ -99,8 +100,20 @@ try {
     const other = users[1 - index]
     const list = await rpc(user.id, 'session/list', { _request: {} })
     check(list.ok && list.value.items.every(item => item.cwd === user.defaultWorkspace), 'session list isolates users')
+    const settings = await rpc(user.id, 'settings/describe', {})
+    check(settings.ok && !settings.value.writable && !settings.value.hasDocument, 'only read-only display defaults')
+    check(settings.value.namespaces.every(row => ['ui-theme', 'locale', 'ui-settings', 'ui-conversation', 'ui-sidebar', 'ui-layout', 'ui-settings-general', 'ui-settings-session-log'].includes(row.ns)), 'deployment settings stay private')
     const own = await rpc(user.id, 'workspaceFiles/read', { workspaceFileScopeId: ids[user.id], path: 'private.txt', range: {} })
     check(own.ok && own.value.text.includes(user.id + ' private'), 'own file readable: ' + JSON.stringify(own))
+    for (const [path, changed] of [['.', 'watch-probe.txt'], ['private.txt', 'private.txt']]) {
+      const frame = await fileWatch(origin, cookies[user.id], ids[user.id], path,
+        () => writeFile(join(user.defaultWorkspace, changed), user.id + ' private updated'))
+      check(frame.type === 'item' && frame.value.kind === 'change', 'own file/directory change notification')
+    }
+    for (const [sessionId, path] of [[ids[other.id], '.'], [ids[user.id], other.defaultWorkspace], [ids[user.id], join(other.defaultWorkspace, 'private.txt')]]) {
+      const frame = await fileWatch(origin, cookies[user.id], sessionId, path)
+      check(frame.type === 'error', 'other user file watch refused')
+    }
     for (const [method, args] of [
       ['session/create', { request: { cwd: other.defaultWorkspace } }],
       ['session/create', { request: { workspaceId: workspaces[other.id] } }],
@@ -113,7 +126,7 @@ try {
       ['workspace/create', { request: { path: other.defaultWorkspace } }],
       ['workspaceFiles/read', { workspaceFileScopeId: ids[user.id], path: join(other.defaultWorkspace, 'private.txt'), range: {} }],
       ['workspaceFiles/read', { workspaceFileScopeId: ids[other.id], path: 'private.txt', range: {} }],
-      ['pluginManager/listBundles', {}], ['settings/describe', {}],
+      ['pluginManager/listBundles', {}], ['settings/update', { ns: 'ui-theme', patch: { preference: 'dark' } }],
     ]) {
       const result = await rpc(user.id, method, args)
       check(!result.ok && result.error.code !== 'gateway/arguments-invalid', 'cross-user/admin refusal: ' + method + ' ' + JSON.stringify(result))
@@ -151,7 +164,7 @@ try {
         await page.waitForTimeout(200)
         check(!frames.join('').includes(ids[other.id]), 'live socket never exposes another user session identity')
         await page.reload(); check(page.url() === origin + '/', 'browser refresh keeps login')
-        await page.getByRole('link', { name: '退出登录' }).click()
+        await page.getByRole('button', { name: '退出登录' }).click()
         await page.getByRole('button', { name: '退出登录' }).click()
         await page.waitForURL(origin + '/auth/login')
         check(page.url().endsWith('/auth/login'), 'browser logout')
