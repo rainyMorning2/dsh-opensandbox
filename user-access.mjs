@@ -1,5 +1,6 @@
 import z from '@deepseek-ai/schemastery'
 import { WorkspacePathPolicy, WorkspacePathDeniedError } from '@deepseek-ai/dsh-workspace'
+import { realpathSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { Accounts, contains } from './src/users/accounts.mjs'
 import { LoginSessions } from './src/users/sessions.mjs'
@@ -9,11 +10,14 @@ import { UserAccess } from './src/users/access.mjs'
 import { AuthorizedDirectoryPicker } from './workspace-access.mjs'
 import { OpenSandboxSubprocess } from './src/subprocess.mjs'
 import { OpenSandboxFileSystem } from './src/fs.mjs'
+import { UserDataDirectories } from './src/users/data-directories.mjs'
 
 export const name = 'opensandbox-user-access'
 export const inject = ['connection', 'remoteAccess', 'workspaceRegistry', 'sessionQuery', 'agents', 'webServer', 'subprocess', 'fs']
 export const Config = z.object({
   configFile: z.string().required(),
+  sharedReadOnlyRoots: z.array(z.string()).required(false),
+  sharedWritableRoots: z.array(z.string()).required(false),
   sessionDatabase: z.string().required(),
   publicOrigin: z.string().required(),
   lifetimeSeconds: z.natural().min(60).max(2592000).default(86400),
@@ -51,13 +55,24 @@ export class UserWorkspacePolicy extends WorkspacePathPolicy {
   }
 }
 
-export function assertUserSandbox(ctx, accounts) {
+export function assertUserSandbox(ctx, accounts, config = {}) {
   if (!(ctx.subprocess instanceof OpenSandboxSubprocess) || !(ctx.fs instanceof OpenSandboxFileSystem)) throw Error('User access requires OpenSandbox subprocess and filesystem providers')
   if (!ctx.subprocess.config.secureExecution) throw Error('User access requires authenticated unprivileged sandbox execution')
   if (!ctx.subprocess.config.apiKey) throw Error('User sandboxes require an OpenSandbox API key')
   const policy = ctx.subprocess.mountPolicy
   if (ctx.fs.mountPolicy !== policy || policy.allowDynamic || !policy.sessionWorkspaceOnly) throw Error('User access requires a shared, session-only mount policy without dynamic grants')
-  if ([...policy.mounts.values()].some(mount => mount.source !== 'workspace') || policy.trustedReadPaths.length) throw Error('User access does not permit shared mounts or trusted host reads')
+  if (policy.trustedReadPaths.length) throw Error('User access does not permit trusted host reads')
+  const shared = [...(config.sharedReadOnlyRoots ?? []).map(path => ({ path: realpathSync(path), writable: false })),
+    ...(config.sharedWritableRoots ?? []).map(path => ({ path: realpathSync(path), writable: true }))]
+  const privateRoots = [...accounts.roots, ...[...accounts.users.values()].flatMap(user => user.dataRoot ? [user.dataRoot] : []),
+    policy.workspaceRoot, ...policy.protectedPaths]
+  for (const mount of shared) {
+    if (privateRoots.some(root => contains(root, mount.path) || contains(mount.path, root))) throw Error('Shared data overlaps private or control paths')
+  }
+  const actual = [...policy.mounts.values()].filter(mount => mount.source !== 'workspace')
+  if (actual.length !== shared.length || actual.some(mount => mount.source !== 'config' || !shared.some(expected => expected.path === mount.path && expected.writable === mount.writable))) throw Error('Shared mounts must exactly match operator-approved data roots')
+  const expectedDataRoots = [...accounts.users.values()].filter(user => user.enabled && user.dataRoot).flatMap(user => user.roots.map(workspaceRoot => ({ workspaceRoot, dataRoot: user.dataRoot })))
+  if (policy.userDataRoots.length !== expectedDataRoots.length || expectedDataRoots.some(expected => !policy.userDataRoots.some(actual => actual.workspaceRoot === expected.workspaceRoot && actual.dataRoot === expected.dataRoot))) throw Error('Sandbox data roots must match the authenticated account configuration')
   for (const root of policy.workspaceParents) {
     if (!accounts.roots.includes(root)) throw Error('Sandbox workspaceParents must be exact configured user roots')
   }
@@ -71,7 +86,8 @@ export function assertUserSandbox(ctx, accounts) {
 export async function apply(ctx, config) {
   const protectedPaths = [resolve(dirname(config.sessionDatabase)), resolve(process.env.DSH_HOME ?? '.dsh')]
   const accounts = Accounts.read(config.configFile, protectedPaths)
-  assertUserSandbox(ctx, accounts)
+  assertUserSandbox(ctx, accounts, config)
+  await ctx.plugin(UserDataDirectories, accounts).await()
   await ctx.plugin(UserWorkspacePolicy, accounts).await()
   await ctx.plugin(AuthorizedDirectoryPicker, { maxEntries: 1000 }).await()
   const headers = new Map()

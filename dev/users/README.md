@@ -15,6 +15,7 @@
       "username": "alice",
       "passwordHash": "填写生成的scrypt哈希",
       "defaultWorkspace": "/srv/value-agent/workspaces/user-a",
+      "dataRoot": "/srv/value-agent/data/user-a",
       "workspaceRoots": ["/srv/value-agent/workspaces/user-a"]
     },
     {
@@ -22,6 +23,7 @@
       "username": "bob",
       "passwordHash": "填写生成的scrypt哈希",
       "defaultWorkspace": "/srv/value-agent/workspaces/user-b",
+      "dataRoot": "/srv/value-agent/data/user-b",
       "enabled": true
     }
   ]
@@ -29,6 +31,8 @@
 ```
 
 `workspaceRoots` 省略时只授权默认目录及其子目录。`enabled: false` 禁用账号，所有配置变更需重启。稳定 `id` 用于归属，不采用用户名作为文件路径。
+
+`dataRoot`是可选的用户业务数据根，估值用户部署要求提供；必须事先创建，不能与任何用户工作区、其他用户dataRoot或控制目录重叠。launch.py将它转换为只由服务端配置的userDataRoots映射。每个用户沙箱同时挂账号配置的完整workspace和自己的dataRoot，路径与应用相同；在两者内启动命令复用同一个沙箱，其他用户目录不挂载。文件读取／下载及修改受同一映射限制，workspace-write的Landlock规则包含这两个目录，read-only不会获得额外写权限。Session、登录和全局配置仍在DSH_HOME，不放进dataRoot。账号或路径配置变更后重启并重建对应执行沙箱，不自动搬移旧数据。
 
 在 Bash 中生成密码哈希，密码不出现在命令行参数或历史里：
 
@@ -65,7 +69,7 @@ python3 dev/users/launch.py \
 
 首次或新浏览器登录按服务端可见Workspace恢复，只有一个默认目录时自动进入。相同账号可以使用多个浏览器。用户会话列表、详情、取消、文件读取及实时事件按当前身份过滤。每用户允许多个不重叠根；同一Workspace下的Session共享文件，子目录Workspace与父目录底层文件仍重叠。子Agent必须保持父Session所属用户，当前只提供内置standard组合。
 
-沙箱实际只挂载当前Session的Workspace。用户模式强制`sessionWorkspaceOnly: true`、`allowDynamicMounts: false`，禁止额外共享挂载与trustedReadPaths；备用目录与用户根分开。OpenSandbox服务端的`allowed_host_paths`也应只列这些用户根。服务端、DSH应用容器及执行容器必须使用一致的绝对目录路径。Docker socket只提供给OpenSandbox服务。
+沙箱挂载账号的完整Workspace和已配置dataRoot。用户模式强制`sessionWorkspaceOnly: true`、`allowDynamicMounts: false`并禁止trustedReadPaths；备用目录与用户根分开。管理员可通过`--shared-read-only`和`--shared-writable`额外配置独立参考库／缓存，必须与用户根、dataRoot及控制目录不重叠，且与共享挂载配置精确匹配。OpenSandbox服务端的`allowed_host_paths`也须显式列出这些目录。服务端、DSH应用容器及执行容器必须使用一致的绝对目录路径。Docker socket只提供给OpenSandbox服务。
 
 账号路径和登录数据库校验失败时插件不提供身份；连接层保持拒绝访问，不退回实例owner模式。认证服务失败返回503而不暴露凭据；失败尝试限流，客户端可等待后重试。
 
@@ -102,3 +106,6 @@ node test/users-live.mjs
 仅提供workspace-write＋ask与danger-full-access＋never，不提供只读选项，设置和插件管理继续关闭。已有Session不会被批量重写；先前固定workspace-write＋never的Session需重新选择工作区模式以采用ask。更换应用与执行镜像后须回收旧无认证沙箱。网络本身仍使用bridge，不宣称禁止所有跨沙箱通信。
 
 审批与提问按所属 Session 授权投递和回答；提问等待与延后回答接口同样限定为用户自己的 Session。需要包含交互资源授权扩展的 DSH 网关，不能仅通过开放事件名称启用非 owner 交互。
+
+
+共享embeddingCache保持可写；SQLite需要创建数据库、WAL与SHM文件，不能把它当作只读向量参考库。多个沙箱使用同一个绝对路径及底层目录，锁与事务由SQLite协调。业务输入的stdin.data经execd文件上传接口送入root私有临时文件，避免shell参数长度限制；成功、失败和取消路径均清理临时文件，仍不提供交互stdin管道。

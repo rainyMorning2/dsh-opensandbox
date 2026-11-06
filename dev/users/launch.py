@@ -13,6 +13,8 @@ p.add_argument('--sandbox-domain', default='127.0.0.1:4080')
 p.add_argument('--image', default='dsh-opensandbox-dev:local')
 p.add_argument('--repo', type=Path, default=Path(__file__).resolve().parents[3] / 'deepseek-harness')
 p.add_argument('--patch', type=Path, action='append', default=[])
+p.add_argument('--shared-read-only', type=Path, action='append', default=[])
+p.add_argument('--shared-writable', type=Path, action='append', default=[])
 p.add_argument('--write-patch-only', action='store_true')
 a = p.parse_args()
 plugin = Path(__file__).resolve().parents[2]
@@ -22,6 +24,7 @@ fallback = home / 'sandbox-bootstrap'
 fallback.mkdir(exist_ok=True, mode=0o700)
 users = json.loads(a.users.read_text())
 roots = [root for user in users['users'] if user.get('enabled', True) for root in user.get('workspaceRoots', [user['defaultWorkspace']])]
+data_roots = [{'workspaceRoot': root, 'dataRoot': user['dataRoot']} for user in users['users'] if user.get('enabled', True) and user.get('dataRoot') for root in user.get('workspaceRoots', [user['defaultWorkspace']])]
 rg = subprocess.check_output(['node', '-e', 'const {createRequire}=require("module");const r=createRequire(process.cwd()+"/packages/fs/tool-fs-search/package.json");process.stdout.write(r("@vscode/ripgrep").rgPath)'], cwd=a.repo, text=True)
 # Keep the native Workspace browser module paired with the restricted host controller.
 workspace_adapter = home / 'workspace-controller-adapter'
@@ -64,6 +67,9 @@ patch += [
             'domain': a.sandbox_domain, 'image': a.image,
             'secureExecution': True, 'workloadUid': os.getuid(), 'workloadGid': os.getgid(),
             'workspaceRoot': str(fallback), 'workspaceParents': roots,
+            'userDataRoots': data_roots,
+            'extraReadOnlyMounts': [str(path.resolve(strict=True)) for path in a.shared_read_only],
+            'extraWritableMounts': [str(path.resolve(strict=True)) for path in a.shared_writable],
             'sessionWorkspaceOnly': True, 'allowDynamicMounts': False,
             'protectedPaths': [str(home), str(a.users.resolve())],
             'timeoutSeconds': 43200, 'cpu': '1', 'memory': '1Gi',
@@ -72,6 +78,8 @@ patch += [
         {'id': 'deployment-users', 'name': str(plugin / 'user-access.mjs'), 'config': {
             'configFile': str(a.users.resolve()), 'sessionDatabase': str(home / 'user-auth/logins.sqlite'),
             'publicOrigin': a.origin,
+            'sharedReadOnlyRoots': [str(path.resolve(strict=True)) for path in a.shared_read_only],
+            'sharedWritableRoots': [str(path.resolve(strict=True)) for path in a.shared_writable],
         }},
     ]},
 ]

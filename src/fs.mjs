@@ -100,12 +100,13 @@ export class OpenSandboxFileSystem extends LocalFileSystem {
 
   /** Keep child targets under a readable directory; drop symlinks that escape. */
   async listDir(target, signal) {
-    const sessionRoot = this.targetRoots.get(target) ?? sessionRootFromOptions(undefined, this.ctx)
+    const sessionRoot = sessionRootFromOptions(undefined, this.ctx) ?? this.targetRoots.get(target)
     const options = { sessionRoot, allowParents: sessionRoot === undefined }
     this.assertVisible(target, 'access', options)
-    const entries = await super.listDir(target, signal)
+    const entries = await super.listDir(await this.readableTarget(target), signal)
     const parent = String(target.targetKey)
     return entries.filter((entry) => {
+      if (sessionRoot !== undefined) this.targetRoots.set(entry.target, sessionRoot)
       const child = String(entry.target.targetKey)
       if (pathContains(parent, child)) return true
       return this.mountPolicy.isReadable(child, options)
@@ -133,6 +134,32 @@ export class OpenSandboxFileSystem extends LocalFileSystem {
     return super.editText(fresh, edit, expected, signal)
   }
 
+  async patchText(target, hunks, expected, signal, sandboxPolicy) {
+    return super.patchText(await this.writableTarget(target, 'patch', sandboxPolicy), hunks, expected, signal)
+  }
+
+  async deleteFile(target, expected, signal, sandboxPolicy) {
+    return super.deleteFile(await this.writableTarget(target, 'delete', sandboxPolicy), expected, signal)
+  }
+
+  async moveFile(source, destination, options, signal, sandboxPolicy) {
+    const from = await this.writableTarget(source, 'move', sandboxPolicy)
+    const to = await this.writableTarget(destination, 'move', sandboxPolicy)
+    return super.moveFile(from, to, options, signal)
+  }
+
+  /** Recheck a retained file target in the current Agent context before reading it. */
+  readableTarget(target) {
+    const sessionRoot = sessionRootFromOptions(undefined, this.ctx) ?? this.targetRoots.get(target)
+    return this.resolve(String(target.targetKey), sessionRoot === undefined ? undefined : { cwd: sessionRoot })
+  }
+
+  async stat(target, signal) { return super.stat(await this.readableTarget(target), signal) }
+  async readText(target, signal) { return super.readText(await this.readableTarget(target), signal) }
+  async streamText(target, signal) { return super.streamText(await this.readableTarget(target), signal) }
+  async readBytes(target, signal, maxBytes) { return super.readBytes(await this.readableTarget(target), signal, maxBytes) }
+  async readByteRange(target, range, signal) { return super.readByteRange(await this.readableTarget(target), range, signal) }
+
   /** Reject a target outside the allowed read set. */
   assertVisible(target, verb, options = {}) {
     if (!this.mountPolicy.isReadable(String(target.targetKey), options)) {
@@ -156,7 +183,7 @@ export class OpenSandboxFileSystem extends LocalFileSystem {
         'FS_SANDBOX_DENIED',
       )
     }
-    const sessionRoot = sessionRootFromSandboxPolicy(sandboxPolicy)
+    const sessionRoot = sessionRootFromOptions(undefined, this.ctx) ?? sessionRootFromSandboxPolicy(sandboxPolicy) ?? this.targetRoots.get(target)
     const options = { sessionRoot, mode }
     if (!this.mountPolicy.isWritable(String(target.targetKey), options)) {
       throw this.denial(verb, target.displayPath, 'writable roots')

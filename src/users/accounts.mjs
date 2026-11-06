@@ -52,7 +52,18 @@ export class Accounts {
         return real
       })
       const defaultWorkspace = this.resolveFor({ roots: canonical }, entry.defaultWorkspace)
+      let dataRoot
+      if (entry.dataRoot !== undefined) {
+        if (typeof entry.dataRoot !== 'string' || !isAbsolute(entry.dataRoot)) throw Error('User data root must be absolute')
+        dataRoot = realpathSync(entry.dataRoot)
+        if (dataRoot !== resolve(entry.dataRoot) || !statSync(dataRoot).isDirectory()) throw Error('User data root must be a canonical existing directory')
+        for (const root of [...protectedPaths, ...claimed]) {
+          if (contains(root, dataRoot) || contains(dataRoot, root)) throw Error('User data root overlaps another configured directory')
+        }
+        claimed.push(dataRoot)
+      }
       const user = { id: entry.id, username: entry.username, passwordHash: entry.passwordHash,
+        ...(dataRoot ? { dataRoot } : {}),
         enabled: entry.enabled !== false, roots: canonical, defaultWorkspace }
       user.revision = digest(JSON.stringify(user))
       this.users.set(user.id, Object.freeze(user))

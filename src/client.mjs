@@ -324,6 +324,29 @@ export class OpenSandboxClient {
     return response
   }
 
+  /** Stage one-shot stdin in the sandbox, outside shell argv size limits. */
+  async writeCommandInput(id, path, data, signal) {
+    const base = await this.execdBase(id, signal)
+    const form = new FormData()
+    // Execd parses octal digits from the JSON number (600, not POSIX bits 384).
+    form.append('metadata', new Blob([JSON.stringify({ path, mode: 600 })], { type: 'application/json' }), 'metadata.json')
+    form.append('file', new Blob([data]), 'stdin')
+    const response = await fetch(`${base}/files/upload`, { method: 'POST',
+      headers: this.execdHeaders(id), body: form,
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(60000)]) : AbortSignal.timeout(60000) })
+    if (!response.ok) throw new OpenSandboxError(`OpenSandbox stdin upload failed: HTTP ${response.status}`)
+    await response.body?.cancel()
+  }
+
+  /** Delete only the transport's generated stdin file, including after cancellation. */
+  async removeCommandInput(id, path) {
+    const base = await this.execdBase(id)
+    const response = await fetch(`${base}/files?path=${encodeURIComponent(path)}`, { method: 'DELETE',
+      headers: this.execdHeaders(id), signal: AbortSignal.timeout(10000) })
+    if (!response.ok && response.status !== 404) throw new OpenSandboxError(`OpenSandbox stdin cleanup failed: HTTP ${response.status}`)
+    await response.body?.cancel()
+  }
+
   /** Interrupt a running command by execd execution id. */
   async interruptCommand(id, executionId, signal) {
     if (executionId.length === 0) return

@@ -154,6 +154,7 @@ function normalizeConfig(config = {}) {
     extraWritableMounts,
     trustedReadPaths,
     workspaceParents,
+    userDataRoots: config.userDataRoots ?? [],
     protectedPaths,
     allowDynamicMounts: config.allowDynamicMounts !== false,
     sessionWorkspaceOnly: config.sessionWorkspaceOnly === true,
@@ -199,6 +200,7 @@ export class OpenSandboxSubprocess extends SubprocessRuntime {
       writableMounts: this.config.extraWritableMounts,
       trustedReadPaths: this.config.trustedReadPaths,
       workspaceParents: this.config.workspaceParents,
+      userDataRoots: this.config.userDataRoots,
       protectedPaths: this.config.protectedPaths,
       allowDynamic: this.config.allowDynamicMounts,
       sessionWorkspaceOnly: this.config.sessionWorkspaceOnly,
@@ -588,6 +590,10 @@ class OpenSandboxCommandProcess {
 
   /** Resolve the sandbox, run the command, and consume its event stream. */
   async start() {
+    let inputPath
+    const cleanupInput = async () => {
+      if (inputPath) { await this.client.removeCommandInput(this.sandboxId, inputPath); inputPath = undefined }
+    }
     try {
       const sessionRoot = this.provider.sessionRootFor(this.spec)
       this.sandboxId = await this.provider.ensureSandboxFor(this.spec.cwd, sessionRoot)
@@ -601,8 +607,9 @@ class OpenSandboxCommandProcess {
       if (this.provider.config.commandTimeoutMs > 0) body.timeout = this.provider.config.commandTimeoutMs
       const stdin = this.spec.stdio?.stdin
       if (stdin !== undefined && stdin !== 'ignore' && typeof stdin === 'object') {
-        const encoded = Buffer.from(String(stdin.data ?? ''), 'utf8').toString('base64')
-        body.command = `printf '%s' '${encoded}' | base64 -d | ${command}`
+        inputPath = `/tmp/.dsh-stdin-${randomBytes(24).toString('hex')}`
+        await this.client.writeCommandInput(this.sandboxId, inputPath, String(stdin.data ?? ''), this.controller.signal)
+        body.command = `${command} < ${shellJoin([inputPath])}`
       }
       const response = await this.client.command(this.sandboxId, body, this.controller.signal)
       for await (const event of sseEvents(response, this.controller.signal)) {
@@ -645,8 +652,10 @@ class OpenSandboxCommandProcess {
         this.exitCode = this.exitCode ?? null
         this.signal = 'SIGKILL'
       }
+      await cleanupInput()
       this.resolveDone({ exitCode: this.exitCode ?? 0, signal: this.signal })
     } catch (error) {
+      try { await cleanupInput() } catch (cleanupError) { this.rejectDone(cleanupError); return }
       if (this.terminated || this.controller.signal.aborted || this.spec.signal?.aborted === true) {
         this.resolveDone({ exitCode: this.exitCode ?? null, signal: 'SIGKILL' })
         return

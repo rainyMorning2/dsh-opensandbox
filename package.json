@@ -52,9 +52,9 @@
   },
   "scripts": {
     "check": "for f in index.mjs workspace-access.mjs user-access.mjs src/*.mjs src/users/*.mjs dev/users/*.mjs; do node --check \"$f\" || exit 1; done",
-    "test": "node test/mount-policy.mjs && node test/bundle.mjs && node test/mock-e2e.mjs && node test/readiness.mjs && node test/workspace-paths.mjs && node test/workspace-access.mjs",
+    "test": "node test/mount-policy.mjs && node test/bundle.mjs && node test/mock-e2e.mjs && node test/readiness.mjs && node test/workspace-paths.mjs && node test/workspace-access.mjs && node --test test/command-input.mjs",
     "pack:check": "npm pack --dry-run",
-    "test:users": "node --test test/users.mjs",
+    "test:users": "node --test test/users.mjs test/user-data-mounts.mjs",
     "test:users-live": "node test/users-live.mjs"
   },
   "dependencies": {

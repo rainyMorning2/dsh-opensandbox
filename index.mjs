@@ -84,6 +84,7 @@ export const Config = z.object({
    * so a model `workdir` still cannot turn a sibling directory into a mount.
    */
   workspaceParents: z.array(z.string()).required(false),
+  userDataRoots: z.array(z.object({ workspaceRoot: z.string().required(), dataRoot: z.string().required() })).required(false),
   /** Exclude the fallback workspace from ordinary Session mounts. */
   sessionWorkspaceOnly: z.boolean().required(false),
   /**

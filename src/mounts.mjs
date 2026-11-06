@@ -75,6 +75,7 @@ export class MountPolicy {
     protectedPaths = [],
     allowDynamic = true,
     sessionWorkspaceOnly = false,
+    userDataRoots = [],
   } = {}) {
     this.workspaceRoot = canonicalMountPath(workspaceRoot)
     this.allowDynamic = allowDynamic !== false
@@ -83,6 +84,20 @@ export class MountPolicy {
     this.trustedReadPaths = []
     this.workspaceParents = normalizePathList(workspaceParents, 'workspace parent', { requireDirectory: true })
     this.protectedPaths = normalizePathList(protectedPaths, 'protected')
+    this.userDataRoots = userDataRoots.map(entry => ({
+      workspaceRoot: normalizePathList([entry.workspaceRoot], 'user workspace', { requireDirectory: true })[0],
+      dataRoot: normalizePathList([entry.dataRoot], 'user data', { requireDirectory: true })[0],
+    }))
+    for (const entry of this.userDataRoots) {
+      if (!this.workspaceParents.includes(entry.workspaceRoot)) throw new OpenSandboxError('User data requires an exact configured workspace parent')
+      if (this.isProtected(entry.dataRoot) || this.protectedPaths.some(path => pathContains(entry.dataRoot, path))) throw new OpenSandboxError('User data overlaps protected paths')
+      if ([this.workspaceRoot, ...this.workspaceParents].some(path => pathContains(path, entry.dataRoot) || pathContains(entry.dataRoot, path))) throw new OpenSandboxError('User data overlaps workspace paths')
+      for (const other of this.userDataRoots) {
+        if (entry === other) continue
+        if (entry.workspaceRoot === other.workspaceRoot) throw new OpenSandboxError('Duplicate user workspace mapping')
+        if (entry.dataRoot !== other.dataRoot && (pathContains(entry.dataRoot, other.dataRoot) || pathContains(other.dataRoot, entry.dataRoot))) throw new OpenSandboxError('User data roots overlap')
+      }
+    }
     this.mounts.set(this.workspaceRoot, mountEntry(this.workspaceRoot, true, 'workspace'))
     for (const value of readOnlyMounts) this.addConfiguredMount(value, false)
     for (const value of writableMounts) this.addConfiguredMount(value, true)
@@ -131,12 +146,25 @@ export class MountPolicy {
   rootFor(path, sessionRoot) {
     const canonical = realpathOrNormalized(path)
     let best
+    const dataRoot = this.userDataRootFor(sessionRoot)
+    if (dataRoot && pathContains(dataRoot, canonical)) best = mountEntry(dataRoot, true, 'user-data')
     for (const entry of this.mounts.values()) {
       if (this.sessionWorkspaceOnly && sessionRoot !== undefined && entry.source === 'workspace') continue
       if (!pathContains(entry.path, canonical)) continue
       if (best === undefined || entry.path.length > best.path.length) best = entry
     }
     return best
+  }
+
+  /** The operator's data root for this workspace, never a model-supplied mount. */
+  userDataRootFor(sessionRoot) {
+    if (sessionRoot === undefined) return undefined
+    const session = realpathOrNormalized(sessionRoot)
+    if (this.userDataRoots.length && session !== resolve(sessionRoot)) throw new OpenSandboxError('User session workspace was redirected')
+    const entry = this.userDataRoots.find(entry => pathContains(entry.workspaceRoot, session))
+    if (!entry) return undefined
+    if (realpathOrNormalized(entry.workspaceRoot) !== entry.workspaceRoot || realpathOrNormalized(entry.dataRoot) !== entry.dataRoot) throw new OpenSandboxError('User directory was redirected')
+    return entry.dataRoot
   }
 
   /** True when `path` is under a protected host tree. */
@@ -155,6 +183,7 @@ export class MountPolicy {
   /** Canonical session root, validated before it can authorise mounts/writes. */
   assertMountableSessionRoot(value) {
     const path = canonicalMountPath(value)
+    if (this.userDataRoots.length && path !== resolve(value)) throw new OpenSandboxError('User session workspace was redirected')
     if (!isDirectory(path)) {
       throw new OpenSandboxError(`OpenSandbox: session workspace ${path} is not an existing host directory`)
     }
@@ -183,7 +212,8 @@ export class MountPolicy {
         )
       }
     }
-    return path
+    const dataRoot = this.userDataRootFor(path)
+    return dataRoot ? this.userDataRoots.find(entry => pathContains(entry.workspaceRoot, path)).workspaceRoot : path
   }
 
   /**
@@ -195,6 +225,10 @@ export class MountPolicy {
   resolveMount(cwd, sessionRoot) {
     const session = this.assertMountableSessionRoot(sessionRoot ?? this.workspaceRoot)
     const path = realpathOrNormalized(cwd)
+    const dataRoot = this.userDataRootFor(session)
+    if (dataRoot && (pathContains(session, path) || pathContains(dataRoot, path))) {
+      return { key: JSON.stringify([session, dataRoot]), root: session, sessionRoot: session }
+    }
     if (!pathContains(session, path)) {
       const global = this.rootFor(path, session)
       if (global === undefined) {
@@ -300,6 +334,8 @@ export class MountPolicy {
   /** Build the OpenSandbox volume list for one sandbox target. */
   volumesFor(rootPath, sessionRoot) {
     const entries = new Map(this.mounts)
+    const dataRoot = this.userDataRootFor(sessionRoot)
+    if (dataRoot) entries.set(dataRoot, mountEntry(dataRoot, true, 'user-data'))
     if (this.sessionWorkspaceOnly && sessionRoot !== undefined) entries.delete(this.workspaceRoot)
     if (sessionRoot !== undefined) {
       const session = this.assertMountableSessionRoot(sessionRoot)

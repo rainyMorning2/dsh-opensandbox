@@ -15,10 +15,10 @@ export class OpenSandboxSandboxProvider extends SandboxProvider {
     if (this.config.secureExecution) {
       if (!['read-only', 'workspace-write', 'danger-full-access'].includes(mode)) throw Error('Unsupported sandbox permission mode')
       const world = this.ctx.subprocess
-      const sessionRoot = world.sessionRootFor({ sandboxPolicy: policy })
-      world.mountPolicy.assertMountableSessionRoot(sessionRoot)
+      const sessionRoot = world.mountPolicy.assertMountableSessionRoot(world.sessionRootFor({ sandboxPolicy: policy }))
       const mapped = world.commandArgv(argv, sessionRoot)
-      const grant = mode === 'workspace-write' ? ['--rw', '/tmp', '--rw', sessionRoot] : []
+      const dataRoot = world.mountPolicy.userDataRootFor(sessionRoot)
+      const grant = mode === 'workspace-write' ? ['--rw', '/tmp', '--rw', sessionRoot, ...(dataRoot ? ['--rw', dataRoot] : [])] : []
       return {
         argv: mode === 'danger-full-access' ? mapped : [POLICY_RUNNER, '--ro', '/', '--rw', '/dev/null', ...grant, '--', ...mapped],
         enforcement: 'full', denialSignatures: ['permission denied'],

@@ -239,6 +239,7 @@ lives in `package.json`. A Nix package of this plugin must install `cordis.patch
 | `sessionWorkspaceOnly` | `false` | When true, a Session mounts only its own immutable workspace and explicit extra mounts. The fallback `workspaceRoot` is excluded from other Sessions and cannot grant file access there. |
 | `executableMappings` | `{}` | Exact absolute host executable paths mapped to absolute container executable paths, for example the packaged ripgrep binary to `/usr/bin/rg`. |
 | `workspaceParents` | `[]` | Host directories under which a dsh session may open a project (for example a code root). They authorise a session workspace but are never bind-mounted themselves, so a sibling project cannot become a model `workdir` mount. |
+| `userDataRoots` | `[]` | Operator-owned `{ workspaceRoot, dataRoot }` mappings. Only the data root belonging to the active workspace is mounted. The users profile verifies these against account configuration; never derive them from model input. |
 | `protectedPaths` | `[]` | Host credential/control trees that must stay hidden from `ctx.fs` unless a trusted read path explicitly covers them. The OpenSandbox server guard should name the same paths to reject bind mounts of their parents. |
 | `allowDynamicMounts` | `true` | Offer the human `/directory-add`, `/directory-remove`, and `/directory-list` commands. The added mounts live only in this dsh process. |
 | `provideFilesystem` | `true` | Mount the plugin's mount-fenced `ctx.fs`. Set `false` only if another trusted provider supplies `ctx.fs`; the shipped `dsh-fs-sandbox` leaves reads unconfined. |
@@ -352,3 +353,6 @@ MIT
 OpenSandbox and DeepSeek Harness are separate projects with their own licenses. This plugin talks
 to OpenSandbox over its HTTP/WebSocket APIs and mounts the dsh capability seams provided by the
 harness.
+
+
+One-shot `stdin: { data }` is transferred through execd's file-upload API rather than shell arguments. The provider uses a private temporary file and removes it before completing the process handle. Interactive `stdin: 'pipe'` remains unsupported. User deployments can explicitly approve separate read-only reference and writable cache mounts; see dev/users/README.md.
